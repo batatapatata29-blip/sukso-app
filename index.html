@@ -109,6 +109,16 @@
     border:1px solid transparent;border-radius:6px;padding:7px 10px;letter-spacing:0.3px;
   }
   .pw-edit:focus{border-color:var(--clay);outline:none;background:var(--surface);}
+
+  /* clock in/out */
+  .clock-card{background:var(--surface);border:1px solid var(--paper-line);border-radius:var(--radius);padding:12px 14px;margin-bottom:12px;}
+  .clock-row{display:flex;gap:10px;}
+  .clock-item{flex:1;display:flex;flex-direction:column;gap:4px;align-items:flex-start;}
+  .clock-label{font-size:11px;color:var(--ink-soft);font-weight:600;}
+  .clock-btn{width:100%;background:var(--ink);color:#fff;border:none;border-radius:8px;padding:9px 0;font-size:13px;font-weight:700;cursor:pointer;font-family:var(--sans);}
+  .clock-time-edit{width:100%;font-family:var(--mono);font-size:14px;border:1px solid var(--paper-line);border-radius:8px;padding:6px 8px;background:var(--paper);color:var(--ink);}
+  .clock-dim{font-size:13px;color:var(--ink-soft);padding:6px 0;}
+  .clock-duration{margin-top:8px;font-size:12px;color:var(--teal);font-weight:600;}
   .job-row{display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap;}
   .pill-btn{
     font-size:12px;border:1px solid var(--paper-line);background:var(--paper);
@@ -294,6 +304,7 @@ let state = {
   mapReady: false,
   geocodeCache: {},
   photoLog: [],
+  workLog: [],
   historyDates: null, // Set of 'YYYY-MM-DD' strings that have records, loaded lazily
   historyMonth: (()=>{ const d=new Date(); return { year: d.getFullYear(), month: d.getMonth() }; })(),
   historySelectedDate: null,
@@ -402,6 +413,47 @@ async function logPhotoSend(propertyId, propertyName, count){
   state.photoLog.push({ ts: new Date().toISOString(), propertyId, propertyName, count });
   await savePhotoLog();
 }
+
+async function loadWorkLog(){
+  try{
+    const res = await window.storage.get('worklog:list', false);
+    if(res && res.value){ state.workLog = JSON.parse(res.value); return; }
+  }catch(e){}
+  state.workLog = [];
+}
+async function saveWorkLog(){
+  try{ await window.storage.set('worklog:list', JSON.stringify(state.workLog), false); }catch(e){}
+}
+function getWorkEntry(dateStr){
+  return state.workLog.find(e=>e.date === dateStr);
+}
+async function upsertWorkEntry(dateStr, patch){
+  const idx = state.workLog.findIndex(e=>e.date === dateStr);
+  if(idx === -1){
+    state.workLog.push({ date: dateStr, clockIn: null, clockOut: null, ...patch });
+  } else {
+    state.workLog[idx] = { ...state.workLog[idx], ...patch };
+  }
+  await saveWorkLog();
+}
+function nowHHMM(){
+  const d = new Date();
+  return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+}
+function durationMinutes(clockIn, clockOut){
+  const [ih, im] = clockIn.split(':').map(Number);
+  const [oh, om] = clockOut.split(':').map(Number);
+  let mins = (oh*60+om) - (ih*60+im);
+  if(mins < 0) mins += 24*60; // 자정 넘어간 경우
+  return mins;
+}
+function formatMinutes(mins){
+  const h = Math.floor(mins/60), m = mins%60;
+  return `${h}시간 ${m}분`;
+}
+function formatDuration(clockIn, clockOut){
+  return formatMinutes(durationMinutes(clockIn, clockOut));
+}
 function lastSendFor(propertyId){
   for(let i = state.photoLog.length - 1; i >= 0; i--){
     if(state.photoLog[i].propertyId === propertyId) return state.photoLog[i];
@@ -494,6 +546,31 @@ function render(){
   }
 }
 
+function renderClockCard(){
+  const entry = getWorkEntry(todayStr()) || { clockIn: null, clockOut: null };
+  return `
+    <div class="clock-card">
+      <div class="clock-row">
+        <div class="clock-item">
+          <span class="clock-label">출근</span>
+          ${entry.clockIn
+            ? `<input type="time" class="clock-time-edit" data-clock-edit="in" value="${entry.clockIn}">`
+            : `<button class="clock-btn" data-clock-action="in">🕒 출근하기</button>`}
+        </div>
+        <div class="clock-item">
+          <span class="clock-label">퇴근</span>
+          ${entry.clockOut
+            ? `<input type="time" class="clock-time-edit" data-clock-edit="out" value="${entry.clockOut}">`
+            : (entry.clockIn
+                ? `<button class="clock-btn" data-clock-action="out">🏁 퇴근하기</button>`
+                : `<span class="clock-dim">출근 후 가능</span>`)}
+        </div>
+      </div>
+      ${entry.clockIn && entry.clockOut ? `<div class="clock-duration">오늘 근무 시간: ${formatDuration(entry.clockIn, entry.clockOut)}</div>` : ''}
+    </div>
+  `;
+}
+
 function renderToday(){
   if(!state.todayRecord){
     const rows = state.properties.map(p=>`
@@ -506,6 +583,7 @@ function renderToday(){
       </label>
     `).join('');
     return `
+      ${renderClockCard()}
       <div class="picker-intro">오늘(${renderDateLabel()}) 방문할 업체를 골라줘. 업체별 참고사항이 자동으로 체크리스트가 돼.</div>
       <div class="paste-box">
         <label>네이버 캘린더 일정 붙여넣기 (선택)</label>
@@ -562,6 +640,7 @@ function renderToday(){
   }).join('');
 
   return `
+    ${renderClockCard()}
     <div class="summary">
       <div>
         <div class="date">${renderDateLabel()}</div>
@@ -654,6 +733,11 @@ function renderHistoryTab(){
   const daysInMonth = new Date(year, month+1, 0).getDate();
   const todayStrVal = todayStr();
 
+  const monthPrefix = `${year}-${pad2(month+1)}`;
+  const monthEntries = state.workLog.filter(e=>e.date.startsWith(monthPrefix));
+  const workDays = monthEntries.filter(e=>e.clockIn).length;
+  const totalMinutes = monthEntries.reduce((sum,e)=> sum + ((e.clockIn && e.clockOut) ? durationMinutes(e.clockIn, e.clockOut) : 0), 0);
+
   let cells = '';
   for(let i=0;i<firstWeekday;i++) cells += `<div class="cal-day empty"></div>`;
   for(let d=1; d<=daysInMonth; d++){
@@ -688,9 +772,14 @@ function renderHistoryTab(){
           </div>
         `;
       }).join('');
+      const workEntry = getWorkEntry(state.historySelectedDate);
+      const workLine = workEntry && (workEntry.clockIn || workEntry.clockOut)
+        ? `<div style="font-size:12.5px;color:var(--ink-soft);margin-bottom:10px;">🕒 출근 ${workEntry.clockIn||'-'} · 🏁 퇴근 ${workEntry.clockOut||'-'}${(workEntry.clockIn&&workEntry.clockOut)?' · '+formatDuration(workEntry.clockIn, workEntry.clockOut):''}</div>`
+        : '';
       detail = `
         <div class="history-detail">
           <h3>${formatDateLabel(state.historySelectedDate)}</h3>
+          ${workLine}
           ${rows || '<div style="font-size:13px;color:var(--ink-soft);">방문 업체 없음</div>'}
         </div>
       `;
@@ -703,9 +792,16 @@ function renderHistoryTab(){
       <div class="month-label">${year}년 ${month+1}월</div>
       <button data-month-nav="1">다음달 ›</button>
     </div>
+    <div class="summary" style="margin-bottom:14px;">
+      <div>
+        <div class="date">${month+1}월 요약</div>
+        <div class="count">근무 <span>${workDays}</span>일 · ${formatMinutes(totalMinutes)}</div>
+      </div>
+    </div>
     <div class="cal-weekdays"><div>일</div><div>월</div><div>화</div><div>수</div><div>목</div><div>금</div><div>토</div></div>
     <div class="cal-grid">${cells}</div>
     ${detail || `<div style="text-align:center;font-size:12.5px;color:var(--ink-soft);">점이 있는 날짜를 눌러보면 그날 기록을 볼 수 있어.</div>`}
+    <button class="relist-btn" id="exportWorkLogBtn" style="margin-top:16px;width:100%;padding:10px;">📤 출퇴근 기록 CSV로 내보내기</button>
   `;
 }
 
@@ -739,6 +835,24 @@ async function selectHistoryDate(dateKey){
     state.historySelectedRecord = null;
   }
   render();
+}
+
+function exportWorkLogCSV(){
+  const rows = [['날짜','출근','퇴근','근무시간']];
+  state.workLog.slice().sort((a,b)=>a.date.localeCompare(b.date)).forEach(e=>{
+    const duration = (e.clockIn && e.clockOut) ? formatDuration(e.clockIn, e.clockOut) : '';
+    rows.push([e.date, e.clockIn || '', e.clockOut || '', duration]);
+  });
+  const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
+  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = '출퇴근기록.csv';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
 
 function openEditSheet(prop){
@@ -942,6 +1056,22 @@ function attachHandlers(){
     };
   });
 
+  document.querySelectorAll('[data-clock-action]').forEach(el=>{
+    el.onclick = async ()=>{
+      const action = el.dataset.clockAction;
+      if(action === 'in') await upsertWorkEntry(todayStr(), { clockIn: nowHHMM() });
+      else await upsertWorkEntry(todayStr(), { clockOut: nowHHMM() });
+      render();
+    };
+  });
+  document.querySelectorAll('[data-clock-edit]').forEach(el=>{
+    el.onchange = async ()=>{
+      const field = el.dataset.clockEdit === 'in' ? 'clockIn' : 'clockOut';
+      await upsertWorkEntry(todayStr(), { [field]: el.value });
+      render();
+    };
+  });
+
   document.querySelectorAll('[data-toggle]').forEach(el=>{
     el.onclick = ()=>{
       const id = el.dataset.toggle;
@@ -1013,6 +1143,8 @@ function attachHandlers(){
   document.querySelectorAll('[data-day]').forEach(el=>{
     el.onclick = ()=> selectHistoryDate(el.dataset.day);
   });
+  const exportWorkLogBtn = document.getElementById('exportWorkLogBtn');
+  if(exportWorkLogBtn) exportWorkLogBtn.onclick = exportWorkLogCSV;
 }
 
 function togglePick(id){
@@ -1068,6 +1200,7 @@ document.getElementById('fab').onclick = ()=> openEditSheet(null);
   await loadKakaoKey();
   await loadGeocodeCache();
   await loadPhotoLog();
+  await loadWorkLog();
   render();
 })();
 </script>
