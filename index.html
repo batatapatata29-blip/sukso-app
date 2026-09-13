@@ -101,6 +101,14 @@
   .job-addr{font-size:13px;color:var(--ink-soft);margin-top:8px;line-height:1.4;}
   .job-addr a{color:var(--teal);text-decoration:none;}
   .job-addr a:active{opacity:0.7;}
+  .job-notes{font-size:12.5px;color:var(--ink-soft);margin-top:8px;line-height:1.5;background:var(--paper);border-radius:6px;padding:8px 10px;}
+  .pw-row{display:flex;align-items:center;gap:8px;margin-top:8px;}
+  .pw-icon{font-size:14px;flex-shrink:0;}
+  .pw-edit{
+    flex:1;font-family:var(--mono);font-size:13px;background:var(--clay-soft);color:var(--clay);
+    border:1px solid transparent;border-radius:6px;padding:7px 10px;letter-spacing:0.3px;
+  }
+  .pw-edit:focus{border-color:var(--clay);outline:none;background:var(--surface);}
   .job-row{display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap;}
   .pill-btn{
     font-size:12px;border:1px solid var(--paper-line);background:var(--paper);
@@ -448,9 +456,8 @@ function kakaoMapUrl(address){
   return 'https://map.kakao.com/link/search/' + encodeURIComponent(address);
 }
 function tasksForProperty(p){
-  const items = splitNotes(p.notes);
-  if(items.length===0) return ['청소상태 확인','세탁물 반납'];
-  return items;
+  // 체크리스트는 고정 2항목. 참고사항은 별도로 그냥 텍스트로만 보여줌.
+  return ['사진찍기','세탁물 전달'];
 }
 
 function renderDateLabel(){
@@ -529,21 +536,22 @@ function renderToday(){
     return `
       <div class="job-card ${isDone?'done':''}">
         <div class="job-head">
-          <div>
-            <div class="job-name">${esc(p.name)}</div>
-            <div class="job-owner">${esc(p.owner||'담당자 미기재')}</div>
-          </div>
+          <div class="job-name">${esc(p.name)}</div>
           <div class="badge-row">
             <span class="badge">OUT ${esc(p.out)}</span>
             <span class="badge">IN ${esc(p.in)}</span>
           </div>
         </div>
-        <div class="job-addr"><a href="${kakaoMapUrl(p.address)}" target="_blank" rel="noopener">🧭 ${esc(p.address)}</a></div>
-        <div class="job-row">
-          ${p.phone ? `<a class="pill-btn" href="tel:${esc(p.phone)}">📞 ${esc(p.phone)}</a>` : ''}
-          <button class="pill-btn" data-reveal="${id}">🔑 비밀번호 보기</button>
+        <div class="badge-row" style="margin-top:8px;flex-wrap:wrap;">
+          ${p.rooms ? `<span class="badge" style="background:var(--teal-soft);color:var(--teal);">🚪 룸/화장실 ${esc(p.rooms)}</span>` : ''}
+          ${p.beds ? `<span class="badge" style="background:var(--teal-soft);color:var(--teal);">🛏 ${esc(p.beds)}</span>` : ''}
         </div>
-        <div class="job-row" data-pw-slot="${id}"></div>
+        <div class="job-addr"><a href="${kakaoMapUrl(p.address)}" target="_blank" rel="noopener">🧭 ${esc(p.address)}</a></div>
+        <div class="pw-row">
+          <span class="pw-icon">🔑</span>
+          <input class="pw-edit" data-pw-edit="${id}" value="${esc(p.password)}" placeholder="비밀번호 없음">
+        </div>
+        ${p.notes ? `<div class="job-notes">📋 ${esc(p.notes)}</div>` : ''}
         <div class="task-list">${taskRows}</div>
         <div class="job-row" style="margin-top:10px;">
           <button class="pill-btn" data-photo="${id}">📷 사진 보내기</button>
@@ -924,12 +932,13 @@ function attachHandlers(){
     };
   });
 
-  document.querySelectorAll('[data-reveal]').forEach(el=>{
-    el.onclick = ()=>{
-      const id = el.dataset.reveal;
-      const p = propById(id);
-      const slot = document.querySelector(`[data-pw-slot="${id}"]`);
-      slot.innerHTML = `<span class="pw-value">🔑 ${esc(p.password)||'등록된 비밀번호 없음'}</span>`;
+  document.querySelectorAll('[data-pw-edit]').forEach(el=>{
+    el.onchange = async ()=>{
+      const id = el.dataset.pwEdit;
+      const idx = state.properties.findIndex(p=>p.id===id);
+      if(idx === -1) return;
+      state.properties[idx] = { ...state.properties[idx], password: el.value.trim() };
+      await saveProperties();
     };
   });
 
