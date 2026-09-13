@@ -1,0 +1,804 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>숙소 관리 수첩</title>
+<style>
+  :root{
+    --paper: #EEF0EA;
+    --paper-line: #D9DCCF;
+    --surface: #FFFFFF;
+    --ink: #1F2A22;
+    --ink-soft: #57604F;
+    --teal: #2B6E63;
+    --teal-soft: #E1EEEB;
+    --mustard: #B4842A;
+    --mustard-soft: #F5EAD3;
+    --clay: #A6432A;
+    --clay-soft: #F5E2DB;
+    --radius: 10px;
+    --serif: "Roboto Slab","Noto Serif KR",serif;
+    --sans: -apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Segoe UI",sans-serif;
+    --mono: "IBM Plex Mono","SFMono-Regular",Consolas,monospace;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;background:var(--paper);color:var(--ink);font-family:var(--sans);}
+  body{padding-bottom:90px;}
+  .topbar{
+    position:sticky;top:0;z-index:20;
+    background:var(--paper);
+    border-bottom:1px solid var(--paper-line);
+    padding:14px 16px 0 16px;
+  }
+  .topbar h1{
+    font-family:var(--serif);
+    font-weight:700;
+    font-size:20px;
+    margin:2px 0 12px 0;
+    letter-spacing:-0.2px;
+  }
+  .tabs{display:flex;gap:0;margin:0;}
+  .tab{
+    flex:1;text-align:center;padding:10px 0 12px 0;
+    font-size:14px;font-weight:600;color:var(--ink-soft);
+    border-bottom:2px solid transparent;cursor:pointer;
+    background:none;border-top:none;border-left:none;border-right:none;
+    font-family:var(--sans);
+  }
+  .tab.active{color:var(--ink);border-bottom:2px solid var(--teal);}
+  main{padding:14px 14px 0 14px;max-width:520px;margin:0 auto;}
+
+  /* summary bar */
+  .summary{
+    display:flex;align-items:center;justify-content:space-between;
+    background:var(--surface);border:1px solid var(--paper-line);
+    border-radius:var(--radius);padding:12px 14px;margin-bottom:12px;
+  }
+  .summary .date{font-size:12px;color:var(--ink-soft);}
+  .summary .count{font-family:var(--serif);font-size:20px;font-weight:700;}
+  .summary .count span{color:var(--teal);}
+  .relist-btn{
+    font-size:12px;color:var(--ink-soft);background:none;border:1px solid var(--paper-line);
+    border-radius:20px;padding:6px 12px;cursor:pointer;font-family:var(--sans);
+  }
+
+  /* picker */
+  .picker-intro{font-size:13px;color:var(--ink-soft);margin:4px 0 12px 0;line-height:1.5;}
+  .picker-list{display:flex;flex-direction:column;gap:6px;margin-bottom:14px;}
+  .picker-row{
+    display:flex;align-items:center;gap:10px;
+    background:var(--surface);border:1px solid var(--paper-line);
+    border-radius:8px;padding:10px 12px;cursor:pointer;
+  }
+  .picker-row.checked{border-color:var(--teal);background:var(--teal-soft);}
+  .picker-row input{width:18px;height:18px;accent-color:var(--teal);flex-shrink:0;}
+  .picker-row .pname{font-size:14px;font-weight:600;}
+  .picker-row .paddr{font-size:12px;color:var(--ink-soft);margin-top:1px;}
+  .confirm-btn{
+    position:sticky;bottom:14px;width:100%;
+    background:var(--ink);color:#fff;border:none;border-radius:var(--radius);
+    padding:14px;font-size:15px;font-weight:700;cursor:pointer;font-family:var(--sans);
+  }
+  .confirm-btn:disabled{background:#B9BEB2;}
+
+  /* today card */
+  .job-card{
+    background:var(--surface);border:1px solid var(--paper-line);
+    border-left:4px solid var(--mustard);
+    border-radius:var(--radius);padding:14px;margin-bottom:12px;
+  }
+  .job-card.done{border-left-color:var(--teal);opacity:0.72;}
+  .job-head{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;}
+  .job-name{font-family:var(--serif);font-size:16px;font-weight:700;}
+  .job-owner{font-size:12px;color:var(--ink-soft);margin-top:2px;}
+  .badge-row{display:flex;gap:6px;flex-shrink:0;}
+  .badge{font-size:11px;font-family:var(--mono);padding:3px 6px;border-radius:5px;background:var(--mustard-soft);color:var(--mustard);white-space:nowrap;}
+  .job-addr{font-size:13px;color:var(--ink-soft);margin-top:8px;line-height:1.4;}
+  .job-addr a{color:var(--teal);text-decoration:none;}
+  .job-addr a:active{opacity:0.7;}
+  .job-row{display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap;}
+  .pill-btn{
+    font-size:12px;border:1px solid var(--paper-line);background:var(--paper);
+    border-radius:20px;padding:6px 11px;cursor:pointer;color:var(--ink);text-decoration:none;
+    font-family:var(--sans);display:inline-flex;align-items:center;gap:4px;
+  }
+  .pw-value{font-family:var(--mono);font-size:13px;background:var(--clay-soft);color:var(--clay);padding:6px 10px;border-radius:6px;letter-spacing:0.3px;}
+  .task-list{margin-top:12px;display:flex;flex-direction:column;gap:6px;}
+  .task-item{
+    display:flex;align-items:flex-start;gap:9px;cursor:pointer;
+    border:1px solid var(--paper-line);border-radius:8px;padding:9px 10px;
+    background:var(--surface);
+  }
+  .task-item .box{
+    width:18px;height:18px;border-radius:5px;border:1.5px solid var(--mustard);
+    flex-shrink:0;margin-top:1px;display:flex;align-items:center;justify-content:center;
+    font-size:12px;color:#fff;
+  }
+  .task-item.done{background:var(--teal-soft);border-color:var(--teal);}
+  .task-item.done .box{background:var(--teal);border-color:var(--teal);}
+  .task-item .ttext{font-size:13px;line-height:1.45;color:var(--ink);}
+  .task-item.done .ttext{color:var(--ink-soft);text-decoration:line-through;}
+  .task-meta{font-size:11px;color:var(--ink-soft);margin-top:8px;}
+
+  /* all list */
+  .search-box{
+    width:100%;padding:11px 14px;border:1px solid var(--paper-line);border-radius:var(--radius);
+    font-size:14px;margin-bottom:12px;background:var(--surface);color:var(--ink);font-family:var(--sans);
+  }
+  .prop-card{
+    background:var(--surface);border:1px solid var(--paper-line);
+    border-radius:var(--radius);padding:12px 14px;margin-bottom:8px;
+  }
+  .prop-top{display:flex;justify-content:space-between;align-items:center;cursor:pointer;gap:8px;}
+  .prop-name{font-family:var(--serif);font-size:15px;font-weight:700;}
+  .prop-sub{font-size:12px;color:var(--ink-soft);margin-top:2px;}
+  .chevron{font-size:12px;color:var(--ink-soft);flex-shrink:0;transition:transform .15s;}
+  .prop-card.open .chevron{transform:rotate(90deg);}
+  .prop-detail{display:none;margin-top:10px;padding-top:10px;border-top:1px solid var(--paper-line);}
+  .prop-card.open .prop-detail{display:block;}
+  .detail-row{font-size:13px;margin-bottom:6px;color:var(--ink);}
+  .detail-row b{color:var(--ink-soft);font-weight:600;margin-right:4px;}
+  .detail-actions{display:flex;gap:8px;margin-top:10px;}
+  .detail-actions button{flex:1;padding:8px;border-radius:8px;font-size:12.5px;cursor:pointer;font-family:var(--sans);border:1px solid var(--paper-line);background:var(--paper);}
+  .detail-actions .del{color:var(--clay);}
+
+  .fab{
+    position:fixed;right:18px;bottom:18px;
+    width:52px;height:52px;border-radius:50%;
+    background:var(--ink);color:#fff;border:none;font-size:26px;
+    box-shadow:0 4px 10px rgba(0,0,0,0.25);cursor:pointer;z-index:30;
+  }
+
+  .empty{text-align:center;padding:40px 20px;color:var(--ink-soft);font-size:13px;line-height:1.6;}
+
+  /* map tab */
+  .map-scope{display:flex;gap:8px;margin-bottom:12px;}
+  .scope-btn{
+    flex:1;padding:9px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;
+    border:1px solid var(--paper-line);background:var(--surface);color:var(--ink-soft);font-family:var(--sans);
+  }
+  .scope-btn.active{background:var(--ink);color:#fff;border-color:var(--ink);}
+  #kakaoMapDiv{
+    width:100%;height:62vh;border-radius:var(--radius);border:1px solid var(--paper-line);
+    background:var(--surface);
+  }
+  .map-hint{font-size:12px;color:var(--ink-soft);margin-top:10px;line-height:1.5;}
+  .setup-card{background:var(--surface);border:1px solid var(--paper-line);border-radius:var(--radius);padding:16px;}
+  .setup-card h3{font-family:var(--serif);font-size:16px;margin:0 0 8px 0;}
+  .setup-card p{font-size:13px;color:var(--ink-soft);line-height:1.6;margin:0 0 12px 0;}
+  .setup-card input{width:100%;padding:10px 11px;border:1px solid var(--paper-line);border-radius:8px;font-size:13px;font-family:var(--mono);background:var(--paper);color:var(--ink);margin-bottom:10px;}
+  .link-row{margin-top:6px;}
+  .link-row button{font-size:11px;color:var(--ink-soft);background:none;border:none;text-decoration:underline;cursor:pointer;padding:0;font-family:var(--sans);}
+
+  /* modal */
+  .overlay{
+    position:fixed;inset:0;background:rgba(20,24,18,0.45);
+    display:flex;align-items:flex-end;justify-content:center;z-index:100;
+  }
+  .sheet{
+    background:var(--surface);width:100%;max-width:520px;
+    border-radius:16px 16px 0 0;padding:18px 16px 22px 16px;
+    max-height:86vh;overflow-y:auto;
+  }
+  .sheet h2{font-family:var(--serif);font-size:17px;margin:0 0 14px 0;}
+  .field{margin-bottom:10px;}
+  .field label{display:block;font-size:12px;color:var(--ink-soft);margin-bottom:4px;font-weight:600;}
+  .field input,.field textarea{
+    width:100%;padding:10px 11px;border:1px solid var(--paper-line);border-radius:8px;
+    font-size:14px;font-family:var(--sans);background:var(--paper);color:var(--ink);
+  }
+  .field textarea{resize:vertical;min-height:50px;}
+  .field-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+  .sheet-actions{display:flex;gap:8px;margin-top:14px;}
+  .sheet-actions button{flex:1;padding:12px;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;border:none;font-family:var(--sans);}
+  .save-btn{background:var(--ink);color:#fff;}
+  .cancel-btn{background:var(--paper);color:var(--ink);border:1px solid var(--paper-line) !important;}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <h1>숙소 관리 수첩</h1>
+  <div class="tabs">
+    <button class="tab" data-tab="today">오늘</button>
+    <button class="tab" data-tab="all">전체 업체</button>
+    <button class="tab" data-tab="map">지도</button>
+  </div>
+</div>
+
+<main id="view"></main>
+<button class="fab" id="fab" style="display:none;">+</button>
+
+<script>
+// 클로드 채팅창 밖(다운로드한 파일, 호스팅된 주소)에서 열 때는
+// window.storage가 없으므로 브라우저 localStorage로 대신 동작하게 함
+if(!window.storage){
+  window.storage = {
+    async get(key, shared){
+      const raw = localStorage.getItem(key);
+      if(raw === null || raw === undefined) return null;
+      return { key, value: raw, shared: !!shared };
+    },
+    async set(key, value, shared){
+      localStorage.setItem(key, value);
+      return { key, value, shared: !!shared };
+    },
+    async delete(key, shared){
+      localStorage.removeItem(key);
+      return { key, deleted: true, shared: !!shared };
+    },
+    async list(prefix, shared){
+      const keys = Object.keys(localStorage).filter(k => !prefix || k.startsWith(prefix));
+      return { keys, prefix, shared: !!shared };
+    }
+  };
+}
+
+const KEY_PROPS = 'properties:list';
+const todayStr = () => {
+  const d = new Date();
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+};
+const todayKey = () => 'today:' + todayStr();
+
+let state = {
+  tab: 'today',
+  properties: [],
+  todayRecord: null, // {propertyIds:[], tasks:{id:[{text,done}]}}
+  pickerSelection: new Set(),
+  search: '',
+  openIds: new Set(),
+  editing: null, // property object being edited, or {} for new
+  kakaoKey: null,
+  mapScope: 'today', // 'today' | 'all'
+  mapReady: false,
+  geocodeCache: {}
+};
+
+const DEFAULT_PROPERTIES = [
+["홍대102호","구정택","010-9244-7984","마포구 양화로23길 4-17 102호","14789*","11","17","2/1","2Q 1SS",""],
+["홍대202호","구정택","010-9244-7984","마포구 양화로23길 4-17 202호","24789*","11","17","3/1","5Q",""],
+["LG팰리스 1408","이수현","010-6357-9991","마포구 양화로 156, 1408호","46464*","11","15","1/1","3Q","매뉴얼있고, 매번 요청사항 알려줌."],
+["LG팰리스 1412","이수현","010-6357-9991","마포구 양화로 156, 1412호","4854924*","11","15","1/1","3Q","매뉴얼있고, 매번 요청사항 알려줌."],
+["LG팰리스 1208","이수현","010-6357-9991","마포구 양화로 156, 1208호","012212*","11","15","1/1","3Q","매뉴얼있고, 매번 요청사항 알려줌."],
+["와우산로 120","이수현","010-6357-9991","마포구 와우산로 120, 4층","5989644*","11","16","3/2","6Q","창고 789, 외부창고 24680"],
+["동교로25길 9 101호","김현진","010-7199-1715","마포구 동교로25길 9 101호","88902*","11","15","2/1","2Q 1SS","계단옆 창고, 싱크대아래휴지3개,음쓰,종량제1개씩싱크대위에"],
+["동교로25길 9 102호","김현진","010-7199-1715","마포구 동교로25길 9 102호","65681*","11","15","2/1","2Q 1SS","계단옆 창고, 싱크대아래휴지3개,음쓰,종량제1개씩싱크대위에"],
+["동교로25길 9 301호","김현진","010-7199-1715","마포구 동교로25길 9 301호","04576*","11","15","2/1","3Q","계단옆 창고, 싱크대아래휴지3개,음쓰,종량제1개씩싱크대위에"],
+["파라다이스텔 508호","이미선","010-5318-5572","마포구 양화로157 508호","8573*","11","15","1복/1","","좌측 캐비닛에 열쇠."],
+["엘지팰리스 729호","이미선","010-5318-5572","마포구 양화로156 729호","1546*","11","15","1복","2Q","화장대 뒤에 열쇠."],
+["엘지팰리스 1520호","이미선","010-5318-5572","마포구 양화로156 1520호","9791*","11","15","1/1","3Q","싱크대아래 서랍열면 좌측상단에 열쇠."],
+["동교스테이A","조기환","010-4075-1504","마포구 와우산로38길 18","7032*,옥2315*","11","15","1/1","3Q","장박손님만 받음. 비품 원목의자 휴지6개, 물티슈3개, 캡슐커피6개, 생수4병, 옥탑창고"],
+["동교스테이B","조기환","010-4075-1504","마포구 와우산로38길 18","5032*,옥2315*","11","15","2/1","2Q 2SS","베란다1234*, 보리차4,녹차4,카누4,맥심4,쌀과자2,약과2,꽈배기2,캡슐커피8,생수1줄, 간접조명키기,마당쓰레기통3개비우기,슬리퍼2개꺼내놓기,이불옆쪽접기,아래쪽덮이게퍼놓기,일회용칫솔·치약8개세팅,화장실창문 꼭 열어두기"],
+["동교스테이C","조기환","010-4075-1504","마포구 와우산로38길 18","5907*,옥2315*","11","15","3/2","4Q","→ 동교스테이B 참고사항과 동일 적용(확인 필요)"],
+["동교스테이D","조기환","010-4075-1504","마포구 와우산로38길 18","6105*,옥2315*","11","15","3/2","4Q","→ 동교스테이B 참고사항과 동일 적용(확인 필요)"],
+["망원동2룸","심하정","010-7749-3080","마포구 망원로 1-21 201호","매번바뀜","11","15","2/1","2Q","창고2개로 침대방0316, 수납장0708, 비번 매번바뀜(체크인날짜로)"],
+["이대2룸","김민지","010-9517-0616","서대문구 대현동 37-74 3층","0317*","11","15","2/1","2Q 1간이","창고 000."],
+["망원동3룸","박지영","010-3225-2457","마포구 망원동 479-24 1층","입2457*,1028*","11","15","3/1","3Q","창고 128, 좌측상단창고 111"],
+["망원동3룸 2층","박지영","010-3225-2457","마포구 망원동 479-24 2층","입2457*,1028*","11","15","3/1","3Q","창고128"],
+["오송아트빌","유한나","010-4269-5769","마포구 성미산로19길 29, b동201호","5807*","11","15","2/1","1Q 1간이",""],
+["제니하우스","윤보희","010-2051-2872","마포구 서교동 483-33 201호","1121*","11","15","2/1","2Q","냉장고물2개"],
+["용강동 투룸","안승재","010-8507-9063","마포구대흥동6길8-7 101호","119900*","11","16","2/1","3Q","싱크대밑110, 현관옆0112"],
+["준삐삐하우스","이리을","010-7377-7462","마포구동교동175-16 4층 401호","매번바뀜 1층창고1239*","11","15","",""," 0585-, 1층창고1239* 현관비번매번바뀜"],
+["마포구청2룸","박향아","","마포구 망원동437-14 102호","매번바뀜","11","15","","",""],
+["서교동북측","김수진","","마포구 잔다리로6길5 804호","9077*","11","15","","",""],
+["연남동3룸","김마야","","마포구 성미산로23길 20 3층","1층공용비번7725 3층9899*","11","15","","","거실000 안방777"],
+["금조스테이투룸","","010-3893-2500","마포구 양화로18안길 34-3","매번바뀜","11","15","","","지하좌측"],
+["금조스테이원룸","","010-3893-2500","마포구 양화로18안길 34-3","매번바뀜","11","15","","","지하우측"],
+["창천동잇다2룸301호","","010-9140-9067","서대문구 신촌로510-18 202호","매번바뀜","11","15","","","창천동투룸 지인"],
+["창천동잇다2룸301호","","010-9140-9067","서대문구 신촌로3길 8-10 301호","매번바뀜","11","15","","","입구 2214종"],
+["창천동잇다2룸303호","","010-9140-9067","서대문구 신촌로3길 8-10 303호","매번바뀜","11","15","","","입구 2214종"],
+["창천동투룸","","010-3781-1887","서대문구 연희2길 51-6 현대빌라102호","매번바뀜","11","15","","",""]
+].map((r,i)=>({
+  id:'p'+(i+1), name:r[0], owner:r[1], phone:r[2], address:r[3], password:r[4],
+  out:r[5], in:r[6], rooms:r[7], beds:r[8], notes:r[9]
+}));
+
+async function loadProperties(){
+  try{
+    const res = await window.storage.get(KEY_PROPS, false);
+    if(res && res.value){ state.properties = JSON.parse(res.value); return; }
+  }catch(e){}
+  state.properties = DEFAULT_PROPERTIES;
+  await saveProperties();
+}
+async function saveProperties(){
+  try{ await window.storage.set(KEY_PROPS, JSON.stringify(state.properties), false); }catch(e){}
+}
+async function loadTodayRecord(){
+  try{
+    const res = await window.storage.get(todayKey(), false);
+    if(res && res.value){
+      const rec = JSON.parse(res.value);
+      if(rec && rec.tasks){ state.todayRecord = rec; return; } // 예전 형식이면 새로 만들게 함
+    }
+  }catch(e){}
+  state.todayRecord = null;
+}
+
+async function loadKakaoKey(){
+  try{
+    const res = await window.storage.get('settings:kakaoKey', false);
+    if(res && res.value){ state.kakaoKey = res.value; }
+  }catch(e){}
+}
+async function saveKakaoKey(key){
+  state.kakaoKey = key;
+  try{ await window.storage.set('settings:kakaoKey', key, false); }catch(e){}
+}
+async function clearKakaoKey(){
+  state.kakaoKey = null;
+  state.mapReady = false;
+  try{ await window.storage.delete('settings:kakaoKey', false); }catch(e){}
+}
+async function loadGeocodeCache(){
+  try{
+    const res = await window.storage.get('geocode:cache', false);
+    if(res && res.value){ state.geocodeCache = JSON.parse(res.value); return; }
+  }catch(e){}
+  state.geocodeCache = {};
+}
+async function saveGeocodeCache(){
+  try{ await window.storage.set('geocode:cache', JSON.stringify(state.geocodeCache), false); }catch(e){}
+}
+async function saveTodayRecord(){
+  try{ await window.storage.set(todayKey(), JSON.stringify(state.todayRecord), false); }catch(e){}
+}
+
+function propById(id){ return state.properties.find(p=>p.id===id); }
+function esc(s){ return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+// 참고사항 텍스트를 개별 체크 항목으로 쪼갬
+function splitNotes(notes){
+  if(!notes || !notes.trim()) return [];
+  return notes
+    .split(/[,，、.\n;]+/)
+    .map(s=>s.trim())
+    .filter(s=>s.length>0);
+}
+function kakaoMapUrl(address){
+  return 'https://map.kakao.com/link/search/' + encodeURIComponent(address);
+}
+function tasksForProperty(p){
+  const items = splitNotes(p.notes);
+  if(items.length===0) return ['청소상태 확인','세탁물 반납'];
+  return items;
+}
+
+function renderDateLabel(){
+  const d = new Date();
+  const days = ['일','월','화','수','목','금','토'];
+  return `${d.getMonth()+1}월 ${d.getDate()}일 (${days[d.getDay()]})`;
+}
+
+function render(){
+  const view = document.getElementById('view');
+  const fab = document.getElementById('fab');
+  document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active', t.dataset.tab===state.tab));
+
+  if(state.tab === 'today'){
+    fab.style.display='none';
+    view.innerHTML = renderToday();
+    attachHandlers();
+  } else if(state.tab === 'all'){
+    fab.style.display='flex';
+    fab.style.alignItems='center';
+    fab.style.justifyContent='center';
+    view.innerHTML = renderAll();
+    attachHandlers();
+  } else if(state.tab === 'map'){
+    fab.style.display='none';
+    view.innerHTML = renderMapTab();
+    attachHandlers();
+    setupMapIfNeeded();
+  }
+}
+
+function renderToday(){
+  if(!state.todayRecord){
+    const rows = state.properties.map(p=>`
+      <label class="picker-row ${state.pickerSelection.has(p.id)?'checked':''}" data-pick="${p.id}">
+        <input type="checkbox" ${state.pickerSelection.has(p.id)?'checked':''} data-pick-cb="${p.id}">
+        <div>
+          <div class="pname">${esc(p.name)}</div>
+          <div class="paddr">${esc(p.address)}</div>
+        </div>
+      </label>
+    `).join('');
+    return `
+      <div class="picker-intro">오늘(${renderDateLabel()}) 방문할 업체를 골라줘. 업체별 참고사항이 자동으로 체크리스트가 돼.</div>
+      <div class="picker-list">${rows}</div>
+      <button class="confirm-btn" id="confirmPick" ${state.pickerSelection.size===0?'disabled':''}>오늘의 리스트 만들기 (${state.pickerSelection.size})</button>
+    `;
+  }
+
+  const ids = state.todayRecord.propertyIds;
+  const taskMap = state.todayRecord.tasks;
+  const doneCount = ids.filter(id => taskMap[id].every(t=>t.done)).length;
+
+  const cards = ids.map(id=>{
+    const p = propById(id);
+    if(!p) return '';
+    const tasks = taskMap[id];
+    const isDone = tasks.every(t=>t.done);
+    const taskRows = tasks.map((t,idx)=>`
+      <div class="task-item ${t.done?'done':''}" data-task="${id}:${idx}">
+        <div class="box">${t.done?'✓':''}</div>
+        <div class="ttext">${esc(t.text)}</div>
+      </div>
+    `).join('');
+    return `
+      <div class="job-card ${isDone?'done':''}">
+        <div class="job-head">
+          <div>
+            <div class="job-name">${esc(p.name)}</div>
+            <div class="job-owner">${esc(p.owner||'담당자 미기재')}</div>
+          </div>
+          <div class="badge-row">
+            <span class="badge">OUT ${esc(p.out)}</span>
+            <span class="badge">IN ${esc(p.in)}</span>
+          </div>
+        </div>
+        <div class="job-addr"><a href="${kakaoMapUrl(p.address)}" target="_blank" rel="noopener">🧭 ${esc(p.address)}</a></div>
+        <div class="job-row">
+          ${p.phone ? `<a class="pill-btn" href="tel:${esc(p.phone)}">📞 ${esc(p.phone)}</a>` : ''}
+          <button class="pill-btn" data-reveal="${id}">🔑 비밀번호 보기</button>
+        </div>
+        <div class="job-row" data-pw-slot="${id}"></div>
+        <div class="task-list">${taskRows}</div>
+      </div>
+    `;
+  }).join('');
+
+  return `
+    <div class="summary">
+      <div>
+        <div class="date">${renderDateLabel()}</div>
+        <div class="count"><span>${doneCount}</span> / ${ids.length} 완료</div>
+      </div>
+      <button class="relist-btn" id="relist">오늘 리스트 다시 선택</button>
+    </div>
+    ${cards}
+  `;
+}
+
+function renderAll(){
+  const q = state.search.trim().toLowerCase();
+  const list = state.properties.filter(p =>
+    !q || p.name.toLowerCase().includes(q) || (p.owner||'').toLowerCase().includes(q) || (p.address||'').toLowerCase().includes(q)
+  );
+  const cards = list.map(p=>{
+    const open = state.openIds.has(p.id);
+    return `
+    <div class="prop-card ${open?'open':''}">
+      <div class="prop-top" data-toggle="${p.id}">
+        <div>
+          <div class="prop-name">${esc(p.name)}</div>
+          <div class="prop-sub">${esc(p.owner||'담당자 미기재')} · ${esc(p.address)}</div>
+        </div>
+        <div class="chevron">▶</div>
+      </div>
+      <div class="prop-detail">
+        <div class="detail-row"><b>주소</b><a href="${kakaoMapUrl(p.address)}" target="_blank" rel="noopener" style="color:var(--teal);">🧭 ${esc(p.address)}</a></div>
+        <div class="detail-row"><b>연락처</b>${p.phone?`<a href="tel:${esc(p.phone)}">${esc(p.phone)}</a>`:'-'}</div>
+        <div class="detail-row"><b>체크인·아웃</b>OUT ${esc(p.out)||'-'} / IN ${esc(p.in)||'-'}</div>
+        <div class="detail-row"><b>룸/화장실</b>${esc(p.rooms)||'-'}</div>
+        <div class="detail-row"><b>침대</b>${esc(p.beds)||'-'}</div>
+        <div class="detail-row"><b>비밀번호</b><span class="pw-value">${esc(p.password)||'-'}</span></div>
+        <div class="detail-row"><b>참고사항</b>${esc(p.notes)||'-'}</div>
+        <div class="detail-actions">
+          <button data-edit="${p.id}">수정</button>
+          <button class="del" data-del="${p.id}">삭제</button>
+        </div>
+      </div>
+    </div>
+    `;
+  }).join('');
+
+  return `
+    <input class="search-box" id="searchBox" placeholder="상호명·담당자·주소로 검색" value="${esc(state.search)}">
+    ${list.length ? cards : `<div class="empty">검색 결과가 없어.<br>다른 검색어로 찾아봐.</div>`}
+  `;
+}
+
+function renderMapTab(){
+  if(!state.kakaoKey){
+    return `
+      <div class="setup-card">
+        <h3>지도를 보려면 카카오 키가 필요해</h3>
+        <p>카카오 개발자센터(developers.kakao.com)에서 발급받은 <b>JavaScript 키</b>를 붙여넣어줘. 무료이고, 한 번만 입력하면 계속 저장돼.</p>
+        <input id="kakaoKeyInput" placeholder="예: 3f9a1b2c... (JavaScript 키)">
+        <button class="confirm-btn" id="saveKakaoKeyBtn" style="position:static;">키 저장하고 지도 열기</button>
+      </div>
+    `;
+  }
+  const scope = state.mapScope;
+  return `
+    <div class="map-scope">
+      <button class="scope-btn ${scope==='today'?'active':''}" data-scope="today">오늘 리스트만</button>
+      <button class="scope-btn ${scope==='all'?'active':''}" data-scope="all">전체 업체</button>
+    </div>
+    <div id="kakaoMapDiv"></div>
+    <div class="map-hint">
+      핀을 누르면 업체 이름이 떠. 주소가 바뀌었거나 위치가 이상하면 전체 업체 탭에서 주소를 다시 확인해줘.
+      <div class="link-row"><button id="changeKakaoKey">카카오 키 변경/삭제</button></div>
+    </div>
+  `;
+}
+
+function openEditSheet(prop){
+  state.editing = prop ? {...prop} : {id:null,name:'',owner:'',phone:'',address:'',password:'',out:'',in:'',rooms:'',beds:'',notes:''};
+  const e = state.editing;
+  const root = document.createElement('div');
+  root.className = 'overlay';
+  root.id = 'overlay';
+  root.innerHTML = `
+    <div class="sheet">
+      <h2>${e.id ? '업체 정보 수정' : '새 업체 추가'}</h2>
+      <div class="field"><label>상호명</label><input id="f_name" value="${esc(e.name)}"></div>
+      <div class="field"><label>담당자</label><input id="f_owner" value="${esc(e.owner)}"></div>
+      <div class="field"><label>연락처</label><input id="f_phone" value="${esc(e.phone)}"></div>
+      <div class="field"><label>주소</label><input id="f_address" value="${esc(e.address)}"></div>
+      <div class="field"><label>비밀번호</label><input id="f_password" value="${esc(e.password)}"></div>
+      <div class="field-grid">
+        <div class="field"><label>체크아웃(OUT)</label><input id="f_out" value="${esc(e.out)}"></div>
+        <div class="field"><label>체크인(IN)</label><input id="f_in" value="${esc(e.in)}"></div>
+      </div>
+      <div class="field-grid">
+        <div class="field"><label>룸/화장실</label><input id="f_rooms" value="${esc(e.rooms)}"></div>
+        <div class="field"><label>침대구성</label><input id="f_beds" value="${esc(e.beds)}"></div>
+      </div>
+      <div class="field"><label>참고사항</label><textarea id="f_notes">${esc(e.notes)}</textarea></div>
+      <div class="sheet-actions">
+        <button class="cancel-btn" id="cancelEdit">취소</button>
+        <button class="save-btn" id="saveEdit">저장</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(root);
+  document.getElementById('cancelEdit').onclick = ()=> root.remove();
+  document.getElementById('saveEdit').onclick = async ()=>{
+    const vals = {
+      name: document.getElementById('f_name').value.trim(),
+      owner: document.getElementById('f_owner').value.trim(),
+      phone: document.getElementById('f_phone').value.trim(),
+      address: document.getElementById('f_address').value.trim(),
+      password: document.getElementById('f_password').value.trim(),
+      out: document.getElementById('f_out').value.trim(),
+      in: document.getElementById('f_in').value.trim(),
+      rooms: document.getElementById('f_rooms').value.trim(),
+      beds: document.getElementById('f_beds').value.trim(),
+      notes: document.getElementById('f_notes').value.trim(),
+    };
+    if(!vals.name){ alert('상호명은 필수야.'); return; }
+    if(e.id){
+      const idx = state.properties.findIndex(p=>p.id===e.id);
+      state.properties[idx] = {...state.properties[idx], ...vals};
+    } else {
+      const newId = 'p' + (Date.now());
+      state.properties.push({id:newId, ...vals});
+    }
+    await saveProperties();
+    root.remove();
+    render();
+  };
+}
+
+let kakaoSDKPromise = null;
+function loadKakaoSDK(key){
+  if(window.kakao && window.kakao.maps && window.kakao.maps.services){
+    return Promise.resolve();
+  }
+  if(kakaoSDKPromise) return kakaoSDKPromise;
+  kakaoSDKPromise = new Promise((resolve, reject)=>{
+    const script = document.createElement('script');
+    script.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${encodeURIComponent(key)}&autoload=false&libraries=services`;
+    script.onload = ()=>{
+      window.kakao.maps.load(()=> resolve());
+    };
+    script.onerror = ()=>{ kakaoSDKPromise = null; reject(new Error('sdk load failed')); };
+    document.head.appendChild(script);
+  });
+  return kakaoSDKPromise;
+}
+
+function geocodeAddress(address){
+  if(state.geocodeCache[address]) return Promise.resolve(state.geocodeCache[address]);
+  return new Promise((resolve)=>{
+    const geocoder = new kakao.maps.services.Geocoder();
+    geocoder.addressSearch(address, (result, status)=>{
+      if(status === kakao.maps.services.Status.OK && result[0]){
+        const coord = { lat: Number(result[0].y), lng: Number(result[0].x) };
+        state.geocodeCache[address] = coord;
+        resolve(coord);
+      } else {
+        resolve(null);
+      }
+    });
+  });
+}
+
+let kakaoMapInstance = null;
+async function setupMapIfNeeded(){
+  if(!state.kakaoKey) return;
+  const container = document.getElementById('kakaoMapDiv');
+  if(!container) return;
+
+  container.innerHTML = '<div style="padding:16px;font-size:13px;color:var(--ink-soft);">지도를 불러오는 중...</div>';
+  try{
+    await loadKakaoSDK(state.kakaoKey);
+  }catch(e){
+    container.innerHTML = '<div style="padding:16px;font-size:13px;color:var(--clay);">지도를 불러오지 못했어. 키가 맞는지, 이 주소가 카카오 개발자센터의 Web 플랫폼에 등록돼 있는지 확인해줘.</div>';
+    return;
+  }
+  container.innerHTML = '';
+
+  const targetIds = state.mapScope === 'today'
+    ? (state.todayRecord ? state.todayRecord.propertyIds : [])
+    : state.properties.map(p=>p.id);
+  const targets = targetIds.map(id=>propById(id)).filter(p=>p && p.address);
+
+  if(targets.length === 0){
+    container.innerHTML = '<div style="padding:16px;font-size:13px;color:var(--ink-soft);">표시할 업체가 없어. ' + (state.mapScope==='today' ? '먼저 "오늘" 탭에서 오늘의 리스트를 만들어줘.' : '') + '</div>';
+    return;
+  }
+
+  const map = new kakao.maps.Map(container, {
+    center: new kakao.maps.LatLng(37.5563, 126.9236), // 마포구 기준
+    level: 7
+  });
+  kakaoMapInstance = map;
+
+  const bounds = new kakao.maps.LatLngBounds();
+  const infowindow = new kakao.maps.InfoWindow({ removable: true });
+  let placed = 0;
+
+  for(const p of targets){
+    const coord = await geocodeAddress(p.address);
+    if(!coord) continue;
+    const pos = new kakao.maps.LatLng(coord.lat, coord.lng);
+    const marker = new kakao.maps.Marker({ position: pos, map });
+    kakao.maps.event.addListener(marker, 'click', ()=>{
+      infowindow.setContent(`<div style="padding:6px 10px;font-size:12.5px;">${esc(p.name)}</div>`);
+      infowindow.open(map, marker);
+    });
+    bounds.extend(pos);
+    placed++;
+  }
+  await saveGeocodeCache();
+
+  if(placed > 0){
+    map.setBounds(bounds);
+  } else {
+    container.innerHTML = '<div style="padding:16px;font-size:13px;color:var(--clay);">주소로 좌표를 찾지 못했어. 주소 표기를 다시 확인해줘.</div>';
+  }
+}
+
+function attachHandlers(){
+  document.querySelectorAll('[data-pick]').forEach(el=>{
+    el.onclick = (ev)=>{
+      if(ev.target.tagName === 'INPUT') return;
+      togglePick(el.dataset.pick);
+    };
+  });
+  document.querySelectorAll('[data-pick-cb]').forEach(el=>{
+    el.onclick = (ev)=>{ ev.stopPropagation(); togglePick(el.dataset.pickCb); };
+  });
+  const confirmBtn = document.getElementById('confirmPick');
+  if(confirmBtn) confirmBtn.onclick = createTodayList;
+
+  const relist = document.getElementById('relist');
+  if(relist) relist.onclick = ()=>{
+    state.pickerSelection = new Set(state.todayRecord.propertyIds);
+    state.todayRecord = null;
+    render();
+  };
+
+  document.querySelectorAll('[data-task]').forEach(el=>{
+    el.onclick = async ()=>{
+      const [id, idx] = el.dataset.task.split(':');
+      const t = state.todayRecord.tasks[id][Number(idx)];
+      t.done = !t.done;
+      await saveTodayRecord();
+      render();
+    };
+  });
+
+  document.querySelectorAll('[data-reveal]').forEach(el=>{
+    el.onclick = ()=>{
+      const id = el.dataset.reveal;
+      const p = propById(id);
+      const slot = document.querySelector(`[data-pw-slot="${id}"]`);
+      slot.innerHTML = `<span class="pw-value">🔑 ${esc(p.password)||'등록된 비밀번호 없음'}</span>`;
+    };
+  });
+
+  document.querySelectorAll('[data-toggle]').forEach(el=>{
+    el.onclick = ()=>{
+      const id = el.dataset.toggle;
+      if(state.openIds.has(id)) state.openIds.delete(id); else state.openIds.add(id);
+      render();
+    };
+  });
+
+  const searchBox = document.getElementById('searchBox');
+  if(searchBox){
+    searchBox.oninput = (e)=>{ state.search = e.target.value; render(); setTimeout(()=>{
+      const sb=document.getElementById('searchBox'); if(sb){sb.focus(); sb.setSelectionRange(sb.value.length,sb.value.length);}
+    },0); };
+  }
+
+  document.querySelectorAll('[data-edit]').forEach(el=>{
+    el.onclick = (ev)=>{ ev.stopPropagation(); openEditSheet(propById(el.dataset.edit)); };
+  });
+  document.querySelectorAll('[data-del]').forEach(el=>{
+    el.onclick = async (ev)=>{
+      ev.stopPropagation();
+      const p = propById(el.dataset.del);
+      if(confirm(`"${p.name}"을(를) 목록에서 삭제할까?`)){
+        state.properties = state.properties.filter(x=>x.id!==p.id);
+        await saveProperties();
+        render();
+      }
+    };
+  });
+
+  const saveKakaoKeyBtn = document.getElementById('saveKakaoKeyBtn');
+  if(saveKakaoKeyBtn){
+    saveKakaoKeyBtn.onclick = async ()=>{
+      const val = document.getElementById('kakaoKeyInput').value.trim();
+      if(!val){ alert('JavaScript 키를 입력해줘.'); return; }
+      await saveKakaoKey(val);
+      render();
+    };
+  }
+  const changeKakaoKey = document.getElementById('changeKakaoKey');
+  if(changeKakaoKey){
+    changeKakaoKey.onclick = async ()=>{
+      if(confirm('저장된 카카오 키를 지울까? 다시 넣기 전까지 지도를 못 봐.')){
+        await clearKakaoKey();
+        render();
+      }
+    };
+  }
+  document.querySelectorAll('[data-scope]').forEach(el=>{
+    el.onclick = ()=>{
+      state.mapScope = el.dataset.scope;
+      render();
+    };
+  });
+}
+
+function togglePick(id){
+  if(state.pickerSelection.has(id)) state.pickerSelection.delete(id);
+  else state.pickerSelection.add(id);
+  render();
+}
+
+async function createTodayList(){
+  const tasks = {};
+  state.pickerSelection.forEach(id=>{
+    const p = propById(id);
+    tasks[id] = tasksForProperty(p).map(text=>({text, done:false}));
+  });
+  state.todayRecord = { propertyIds: Array.from(state.pickerSelection), tasks };
+  await saveTodayRecord();
+  render();
+}
+
+document.querySelectorAll('.tab').forEach(t=>{
+  t.onclick = ()=>{ state.tab = t.dataset.tab; render(); };
+});
+document.getElementById('fab').onclick = ()=> openEditSheet(null);
+
+(async function init(){
+  await loadProperties();
+  await loadTodayRecord();
+  await loadKakaoKey();
+  await loadGeocodeCache();
+  render();
+})();
+</script>
+</body>
+</html>
