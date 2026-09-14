@@ -77,6 +77,11 @@
   }
   .picker-row.checked{border-color:var(--teal);background:var(--teal-soft);}
   .picker-row input{width:18px;height:18px;accent-color:var(--teal);flex-shrink:0;}
+  .priority-toggle{
+    flex-shrink:0;font-size:11px;border:1px solid var(--paper-line);background:var(--surface);color:var(--ink-soft);
+    border-radius:14px;padding:5px 9px;cursor:pointer;font-family:var(--sans);
+  }
+  .priority-toggle.active{background:var(--clay);border-color:var(--clay);color:#fff;}
   .picker-row .pname{font-size:14px;font-weight:600;}
   .picker-row .paddr{font-size:12px;color:var(--ink-soft);margin-top:1px;}
   .confirm-btn{
@@ -97,7 +102,22 @@
     border-radius:var(--radius);padding:14px;margin-bottom:12px;
   }
   .job-card.done{border-left-color:var(--teal);opacity:0.72;}
-  .job-head{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;}
+  .job-card.priority{border-left-color:var(--clay);}
+  .job-head{display:flex;justify-content:space-between;align-items:center;gap:8px;cursor:pointer;}
+  .order-num{
+    flex-shrink:0;width:24px;height:24px;border-radius:50%;background:var(--ink);color:#fff;
+    font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center;
+  }
+  .job-detail{display:none;}
+  .job-card.open .job-detail{display:block;}
+  .job-card .chevron{font-size:11px;color:var(--ink-soft);transition:transform .15s;}
+  .job-card.open .chevron{transform:rotate(90deg);}
+  .order-controls{display:flex;flex-direction:column;gap:2px;}
+  .order-controls button{
+    width:22px;height:18px;border:1px solid var(--paper-line);background:var(--surface);
+    border-radius:4px;font-size:10px;line-height:1;cursor:pointer;color:var(--ink-soft);padding:0;
+  }
+  .order-controls button:disabled{opacity:0.3;cursor:default;}
   .job-name{font-family:var(--serif);font-size:16px;font-weight:700;}
   .job-owner{font-size:12px;color:var(--ink-soft);margin-top:2px;}
   .badge-row{display:flex;gap:6px;flex-shrink:0;}
@@ -298,6 +318,8 @@ let state = {
   properties: [],
   todayRecord: null, // {propertyIds:[], tasks:{id:[{text,done}]}}
   pickerSelection: new Set(),
+  pickerPriority: new Set(),
+  openJobIds: new Set(),
   calPasteText: '',
   calPasteResultMsg: '',
   search: '',
@@ -308,6 +330,7 @@ let state = {
   mapReady: false,
   geocodeCache: {},
   photoLog: [],
+  reportLog: [],
   workLog: [],
   historyDates: null, // Set of 'YYYY-MM-DD' strings that have records, loaded lazily
   historyMonth: (()=>{ const d=new Date(); return { year: d.getFullYear(), month: d.getMonth() }; })(),
@@ -416,6 +439,46 @@ async function savePhotoLog(){
 async function logPhotoSend(propertyId, propertyName, count){
   state.photoLog.push({ ts: new Date().toISOString(), propertyId, propertyName, count });
   await savePhotoLog();
+}
+
+async function loadReportLog(){
+  try{
+    const res = await window.storage.get('report-log:list', false);
+    if(res && res.value){ state.reportLog = JSON.parse(res.value); return; }
+  }catch(e){}
+  state.reportLog = [];
+}
+async function saveReportLog(){
+  if(state.reportLog.length > 300) state.reportLog = state.reportLog.slice(-300);
+  try{ await window.storage.set('report-log:list', JSON.stringify(state.reportLog), false); }catch(e){}
+}
+function lastReportFor(propertyId){
+  for(let i = state.reportLog.length - 1; i >= 0; i--){
+    if(state.reportLog[i].propertyId === propertyId) return state.reportLog[i];
+  }
+  return null;
+}
+function triggerCompletionReport(propertyId){
+  const p = propById(propertyId);
+  if(!p) return;
+  const d = new Date();
+  const dateLabel = `${d.getMonth()+1}/${d.getDate()}`;
+  const message = `[완료 보고] ${dateLabel} ${p.name} 청소 확인 및 세탁물 반납 완료했습니다.`;
+  const doShare = async ()=>{
+    try{
+      if(navigator.share){
+        await navigator.share({ title: '완료 보고', text: message });
+      } else {
+        alert('이 브라우저에서는 자동 공유가 안 돼. 아래 문구를 복사해서 직접 보내줘.\n\n' + message);
+      }
+    }catch(err){
+      if(err && err.name === 'AbortError') return;
+    }
+    state.reportLog.push({ ts: new Date().toISOString(), propertyId, propertyName: p.name });
+    await saveReportLog();
+    render();
+  };
+  doShare();
 }
 
 async function loadWorkLog(){
@@ -580,10 +643,11 @@ function renderToday(){
     const rows = state.properties.map(p=>`
       <label class="picker-row ${state.pickerSelection.has(p.id)?'checked':''}" data-pick="${p.id}">
         <input type="checkbox" ${state.pickerSelection.has(p.id)?'checked':''} data-pick-cb="${p.id}">
-        <div>
+        <div style="flex:1;">
           <div class="pname">${esc(p.name)}</div>
           <div class="paddr">${esc(p.address)}</div>
         </div>
+        <button class="priority-toggle ${state.pickerPriority.has(p.id)?'active':''}" data-priority="${p.id}">🔴 당일체크인</button>
       </label>
     `).join('');
     return `
@@ -604,11 +668,12 @@ function renderToday(){
   const taskMap = state.todayRecord.tasks;
   const doneCount = ids.filter(id => taskMap[id].every(t=>t.done)).length;
 
-  const cards = ids.map(id=>{
+  const cards = ids.map((id, cardIdx)=>{
     const p = propById(id);
     if(!p) return '';
     const tasks = taskMap[id];
     const isDone = tasks.every(t=>t.done);
+    const isPriority = (state.todayRecord.priorityIds || []).includes(id);
     const taskRows = tasks.map((t,idx)=>`
       <div class="task-item ${t.done?'done':''}" data-task="${id}:${idx}">
         <div class="box">${t.done?'✓':''}</div>
@@ -616,29 +681,44 @@ function renderToday(){
       </div>
     `).join('');
     return `
-      <div class="job-card ${isDone?'done':''}">
-        <div class="job-head">
-          <div class="job-name">${esc(p.name)}</div>
-          <div class="badge-row">
-            <span class="badge">OUT ${esc(p.out)}</span>
+      <div class="job-card ${isDone?'done':''} ${isPriority && !isDone ?'priority':''} ${state.openJobIds.has(id)?'open':''}">
+        <div class="job-head" data-toggle-job="${id}">
+          <div style="display:flex;align-items:center;gap:8px;min-width:0;">
+            <span class="order-num">${cardIdx+1}</span>
+            <div class="job-name" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(p.name)}</div>
+            ${isPriority ? `<span class="badge" style="background:var(--clay-soft);color:var(--clay);flex-shrink:0;">🔴</span>` : ''}
+            ${isDone ? `<span class="badge" style="background:var(--teal-soft);color:var(--teal);flex-shrink:0;">✓</span>` : ''}
+          </div>
+          <div style="display:flex;align-items:flex-start;gap:8px;flex-shrink:0;">
+            <div class="order-controls">
+              <button data-move="${id}:-1" ${cardIdx===0?'disabled':''}>▲</button>
+              <button data-move="${id}:1" ${cardIdx===ids.length-1?'disabled':''}>▼</button>
+            </div>
             <span class="badge">IN ${esc(p.in)}</span>
+            <span class="chevron">▶</span>
           </div>
         </div>
-        <div class="badge-row" style="margin-top:8px;flex-wrap:wrap;">
-          ${p.rooms ? `<span class="badge" style="background:var(--teal-soft);color:var(--teal);">🚪 룸/화장실 ${esc(p.rooms)}</span>` : ''}
-          ${p.beds ? `<span class="badge" style="background:var(--teal-soft);color:var(--teal);">🛏 ${esc(p.beds)}</span>` : ''}
+        <div class="job-detail">
+          <div class="badge-row" style="margin-top:8px;flex-wrap:wrap;">
+            <span class="badge">OUT ${esc(p.out)}</span>
+            ${p.rooms ? `<span class="badge" style="background:var(--teal-soft);color:var(--teal);">🚪 룸/화장실 ${esc(p.rooms)}</span>` : ''}
+            ${p.beds ? `<span class="badge" style="background:var(--teal-soft);color:var(--teal);">🛏 ${esc(p.beds)}</span>` : ''}
+          </div>
+          <div class="job-addr"><a href="${kakaoMapUrl(p.address)}" target="_blank" rel="noopener">🧭 ${esc(p.address)}</a></div>
+          <div class="pw-row">
+            <span class="pw-icon">🔑</span>
+            <input class="pw-edit" data-pw-edit="${id}" value="${esc(p.password)}" placeholder="비밀번호 없음">
+          </div>
+          ${p.notes ? `<div class="job-notes">📋 ${esc(p.notes)}</div>` : ''}
+          ${p.parkingUrl ? `<div class="job-row" style="margin-top:8px;"><a class="pill-btn" href="${esc(p.parkingUrl)}" target="_blank" rel="noopener">🚗 주차등록${(p.parkingId||p.parkingPw)?` (${esc(p.parkingId)}/${esc(p.parkingPw)})`:''}</a></div>` : ''}
+          <div class="task-list">${taskRows}</div>
+          <div class="job-row" style="margin-top:10px;">
+            <button class="pill-btn" data-photo="${id}">📷 사진 보내기</button>
+            ${isDone ? `<button class="pill-btn" data-report="${id}" style="background:var(--teal-soft);color:var(--teal);">📨 완료 보고하기</button>` : ''}
+          </div>
+          ${lastSendFor(id) ? `<div class="task-meta">최근 전송: ${formatSendTime(lastSendFor(id).ts)} · 사진 ${lastSendFor(id).count}장</div>` : ''}
+          ${lastReportFor(id) ? `<div class="task-meta">최근 보고: ${formatSendTime(lastReportFor(id).ts)}</div>` : ''}
         </div>
-        <div class="job-addr"><a href="${kakaoMapUrl(p.address)}" target="_blank" rel="noopener">🧭 ${esc(p.address)}</a></div>
-        <div class="pw-row">
-          <span class="pw-icon">🔑</span>
-          <input class="pw-edit" data-pw-edit="${id}" value="${esc(p.password)}" placeholder="비밀번호 없음">
-        </div>
-        ${p.notes ? `<div class="job-notes">📋 ${esc(p.notes)}</div>` : ''}
-        <div class="task-list">${taskRows}</div>
-        <div class="job-row" style="margin-top:10px;">
-          <button class="pill-btn" data-photo="${id}">📷 사진 보내기</button>
-        </div>
-        ${lastSendFor(id) ? `<div class="task-meta">최근 전송: ${formatSendTime(lastSendFor(id).ts)} · 사진 ${lastSendFor(id).count}장</div>` : ''}
       </div>
     `;
   }).join('');
@@ -680,6 +760,7 @@ function renderAll(){
         <div class="detail-row"><b>침대</b>${esc(p.beds)||'-'}</div>
         <div class="detail-row"><b>비밀번호</b><span class="pw-value">${esc(p.password)||'-'}</span></div>
         <div class="detail-row"><b>참고사항</b>${esc(p.notes)||'-'}</div>
+        ${p.parkingUrl ? `<div class="detail-row"><b>주차등록</b><a href="${esc(p.parkingUrl)}" target="_blank" rel="noopener" style="color:var(--teal);">🚗 등록 사이트 열기</a>${(p.parkingId||p.parkingPw) ? ` · <span class="pw-value">${esc(p.parkingId)} / ${esc(p.parkingPw)}</span>` : ''}</div>` : ''}
         <div class="detail-row"><b>전송 기록</b>${
           (() => {
             const entries = state.photoLog.filter(e=>e.propertyId===p.id).slice(-3).reverse();
@@ -860,7 +941,7 @@ function exportWorkLogCSV(){
 }
 
 function openEditSheet(prop){
-  state.editing = prop ? {...prop} : {id:null,name:'',owner:'',phone:'',address:'',password:'',out:'',in:'',rooms:'',beds:'',notes:''};
+  state.editing = prop ? {...prop} : {id:null,name:'',owner:'',phone:'',address:'',password:'',out:'',in:'',rooms:'',beds:'',notes:'',parkingUrl:'',parkingId:'',parkingPw:''};
   const e = state.editing;
   const root = document.createElement('div');
   root.className = 'overlay';
@@ -882,6 +963,11 @@ function openEditSheet(prop){
         <div class="field"><label>침대구성</label><input id="f_beds" value="${esc(e.beds)}"></div>
       </div>
       <div class="field"><label>참고사항</label><textarea id="f_notes">${esc(e.notes)}</textarea></div>
+      <div class="field"><label>주차등록 사이트 (있는 경우만)</label><input id="f_parkingUrl" value="${esc(e.parkingUrl||'')}" placeholder="https://..."></div>
+      <div class="field-grid">
+        <div class="field"><label>주차등록 아이디</label><input id="f_parkingId" value="${esc(e.parkingId||'')}"></div>
+        <div class="field"><label>주차등록 비밀번호</label><input id="f_parkingPw" value="${esc(e.parkingPw||'')}"></div>
+      </div>
       <div class="sheet-actions">
         <button class="cancel-btn" id="cancelEdit">취소</button>
         <button class="save-btn" id="saveEdit">저장</button>
@@ -902,6 +988,9 @@ function openEditSheet(prop){
       rooms: document.getElementById('f_rooms').value.trim(),
       beds: document.getElementById('f_beds').value.trim(),
       notes: document.getElementById('f_notes').value.trim(),
+      parkingUrl: document.getElementById('f_parkingUrl').value.trim(),
+      parkingId: document.getElementById('f_parkingId').value.trim(),
+      parkingPw: document.getElementById('f_parkingPw').value.trim(),
     };
     if(!vals.name){ alert('상호명은 필수야.'); return; }
     if(e.id){
@@ -992,7 +1081,13 @@ async function setupMapIfNeeded(){
     const pos = new kakao.maps.LatLng(coord.lat, coord.lng);
     const marker = new kakao.maps.Marker({ position: pos, map });
     kakao.maps.event.addListener(marker, 'click', ()=>{
-      infowindow.setContent(`<div style="padding:6px 10px;font-size:12.5px;">${esc(p.name)}</div>`);
+      const navUrl = `https://map.kakao.com/link/to/${encodeURIComponent(p.name)},${coord.lat},${coord.lng}`;
+      infowindow.setContent(`
+        <div style="padding:8px 10px;font-size:12.5px;line-height:1.6;">
+          <div style="font-weight:700;margin-bottom:4px;">${esc(p.name)}</div>
+          <a href="${navUrl}" target="_blank" rel="noopener" style="color:#2B6E63;text-decoration:underline;">🧭 길찾기</a>
+        </div>
+      `);
       infowindow.open(map, marker);
     });
     bounds.extend(pos);
@@ -1010,12 +1105,21 @@ async function setupMapIfNeeded(){
 function attachHandlers(){
   document.querySelectorAll('[data-pick]').forEach(el=>{
     el.onclick = (ev)=>{
-      if(ev.target.tagName === 'INPUT') return;
+      if(ev.target.tagName === 'INPUT' || ev.target.closest('.priority-toggle')) return;
       togglePick(el.dataset.pick);
     };
   });
   document.querySelectorAll('[data-pick-cb]').forEach(el=>{
     el.onclick = (ev)=>{ ev.stopPropagation(); togglePick(el.dataset.pickCb); };
+  });
+  document.querySelectorAll('[data-priority]').forEach(el=>{
+    el.onclick = (ev)=>{
+      ev.stopPropagation();
+      const id = el.dataset.priority;
+      if(state.pickerPriority.has(id)) state.pickerPriority.delete(id);
+      else state.pickerPriority.add(id);
+      render();
+    };
   });
   const confirmBtn = document.getElementById('confirmPick');
   if(confirmBtn) confirmBtn.onclick = createTodayList;
@@ -1036,6 +1140,7 @@ function attachHandlers(){
   const relist = document.getElementById('relist');
   if(relist) relist.onclick = ()=>{
     state.pickerSelection = new Set(state.todayRecord.propertyIds);
+    state.pickerPriority = new Set(state.todayRecord.priorityIds || []);
     state.todayRecord = null;
     render();
   };
@@ -1109,6 +1214,24 @@ function attachHandlers(){
   document.querySelectorAll('[data-photo]').forEach(el=>{
     el.onclick = ()=> triggerPhotoShare(el.dataset.photo);
   });
+  document.querySelectorAll('[data-report]').forEach(el=>{
+    el.onclick = ()=> triggerCompletionReport(el.dataset.report);
+  });
+  document.querySelectorAll('[data-move]').forEach(el=>{
+    el.onclick = (ev)=>{
+      ev.stopPropagation();
+      const [id, dir] = el.dataset.move.split(':');
+      moveJobCard(id, Number(dir));
+    };
+  });
+  document.querySelectorAll('[data-toggle-job]').forEach(el=>{
+    el.onclick = ()=>{
+      const id = el.dataset.toggleJob;
+      if(state.openJobIds.has(id)) state.openJobIds.delete(id);
+      else state.openJobIds.add(id);
+      render();
+    };
+  });
   const saveKakaoKeyBtn = document.getElementById('saveKakaoKeyBtn');
   if(saveKakaoKeyBtn){
     saveKakaoKeyBtn.onclick = async ()=>{
@@ -1180,15 +1303,40 @@ function matchPastedCalendar(text){
   return { matchedCount, matchedNames };
 }
 
+function parseInTimeForSort(inVal){
+  const n = parseInt(inVal, 10);
+  return isNaN(n) ? 9999 : n; // 체크인 시간 없으면 맨 뒤로
+}
+
+async function moveJobCard(id, direction){
+  const ids = state.todayRecord.propertyIds;
+  const idx = ids.indexOf(id);
+  const newIdx = idx + direction;
+  if(idx === -1 || newIdx < 0 || newIdx >= ids.length) return;
+  [ids[idx], ids[newIdx]] = [ids[newIdx], ids[idx]];
+  await saveTodayRecord();
+  render();
+}
+
 async function createTodayList(){
   const tasks = {};
-  state.pickerSelection.forEach(id=>{
+  const selected = Array.from(state.pickerSelection);
+  // 당일 체크인 표시된 곳을 최우선으로, 나머지는 고른 순서 그대로 (체크인 시간은 참고만)
+  const orderedIds = selected.sort((a,b)=>{
+    const pa = state.pickerPriority.has(a) ? 0 : 1;
+    const pb = state.pickerPriority.has(b) ? 0 : 1;
+    if(pa !== pb) return pa - pb;
+    return parseInTimeForSort(propById(a).in) - parseInTimeForSort(propById(b).in);
+  });
+  orderedIds.forEach(id=>{
     const p = propById(id);
     tasks[id] = tasksForProperty(p).map(text=>({text, done:false}));
   });
-  state.todayRecord = { propertyIds: Array.from(state.pickerSelection), tasks };
+  state.todayRecord = { propertyIds: orderedIds, tasks, priorityIds: Array.from(state.pickerPriority) };
+  state.openJobIds = new Set(orderedIds);
   state.calPasteText = '';
   state.calPasteResultMsg = '';
+  state.pickerPriority = new Set();
   await saveTodayRecord();
   render();
 }
@@ -1201,9 +1349,11 @@ document.getElementById('fab').onclick = ()=> openEditSheet(null);
 (async function init(){
   await loadProperties();
   await loadTodayRecord();
+  if(state.todayRecord) state.openJobIds = new Set(state.todayRecord.propertyIds);
   await loadKakaoKey();
   await loadGeocodeCache();
   await loadPhotoLog();
+  await loadReportLog();
   await loadWorkLog();
   render();
 })();
