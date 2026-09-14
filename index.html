@@ -430,6 +430,86 @@ async function saveCompanyLocation(){
     }
   }catch(e){}
 }
+function openBulkParkingSheet(){
+  const selected = new Set();
+  const root = document.createElement('div');
+  root.className = 'overlay';
+  root.id = 'overlay';
+
+  function rowsHtml(filter){
+    const q = (filter||'').trim().toLowerCase();
+    return state.properties
+      .filter(p => !q || p.name.toLowerCase().includes(q) || (p.address||'').toLowerCase().includes(q))
+      .map(p => `
+        <label class="picker-row ${selected.has(p.id)?'checked':''}" data-bulk-pick="${p.id}">
+          <input type="checkbox" ${selected.has(p.id)?'checked':''} data-bulk-pick-cb="${p.id}">
+          <div style="flex:1;">
+            <div class="pname">${esc(p.name)}</div>
+            <div class="paddr">${esc(p.address)}</div>
+          </div>
+        </label>
+      `).join('');
+  }
+
+  root.innerHTML = `
+    <div class="sheet">
+      <h2>주차등록 정보 한번에 적용</h2>
+      <div class="field"><label>적용할 업체 검색</label><input id="bulkSearchBox" placeholder="이름·주소로 찾기"></div>
+      <div class="picker-list" id="bulkPickList" style="max-height:200px;overflow-y:auto;">${rowsHtml('')}</div>
+      <div class="field" style="margin-top:12px;"><label>주차등록 사이트</label><input id="bulk_url" placeholder="https://..."></div>
+      <div class="field-grid">
+        <div class="field"><label>아이디</label><input id="bulk_id"></div>
+        <div class="field"><label>비밀번호</label><input id="bulk_pw"></div>
+      </div>
+      <div class="sheet-actions">
+        <button class="cancel-btn" id="cancelBulk">취소</button>
+        <button class="save-btn" id="applyBulk">선택한 업체에 적용</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(root);
+
+  function attachRowHandlers(){
+    root.querySelectorAll('[data-bulk-pick]').forEach(el=>{
+      el.onclick = (ev)=>{
+        if(ev.target.tagName === 'INPUT') return;
+        const id = el.dataset.bulkPick;
+        if(selected.has(id)) selected.delete(id); else selected.add(id);
+        document.getElementById('bulkPickList').innerHTML = rowsHtml(document.getElementById('bulkSearchBox').value);
+        attachRowHandlers();
+      };
+    });
+    root.querySelectorAll('[data-bulk-pick-cb]').forEach(el=>{
+      el.onclick = (ev)=>{
+        ev.stopPropagation();
+        const id = el.dataset.bulkPickCb;
+        if(selected.has(id)) selected.delete(id); else selected.add(id);
+      };
+    });
+  }
+  attachRowHandlers();
+
+  document.getElementById('bulkSearchBox').oninput = (e)=>{
+    document.getElementById('bulkPickList').innerHTML = rowsHtml(e.target.value);
+    attachRowHandlers();
+  };
+
+  document.getElementById('cancelBulk').onclick = ()=> root.remove();
+  document.getElementById('applyBulk').onclick = async ()=>{
+    const url = document.getElementById('bulk_url').value.trim();
+    const id = document.getElementById('bulk_id').value.trim();
+    const pw = document.getElementById('bulk_pw').value.trim();
+    if(selected.size === 0){ alert('적용할 업체를 하나 이상 선택해줘.'); return; }
+    if(!url){ alert('주차등록 사이트 주소는 필수야.'); return; }
+    state.properties = state.properties.map(p =>
+      selected.has(p.id) ? { ...p, parkingUrl: url, parkingId: id, parkingPw: pw } : p
+    );
+    await saveProperties();
+    root.remove();
+    render();
+  };
+}
+
 function openCompanyLocationSheet(){
   const cur = state.companyLocation || { name:'', address:'', owner:'', phone:'' };
   const root = document.createElement('div');
@@ -842,6 +922,7 @@ function renderAll(){
 
   return `
     <input class="search-box" id="searchBox" placeholder="상호명·담당자·주소로 검색" value="${esc(state.search)}">
+    <button class="pill-btn" id="bulkParkingBtn" style="margin-bottom:12px;">🚗 여러 업체에 주차등록 정보 한번에 적용</button>
     ${list.length ? cards : `<div class="empty">검색 결과가 없어.<br>다른 검색어로 찾아봐.</div>`}
   `;
 }
@@ -1304,6 +1385,8 @@ function attachHandlers(){
   document.querySelectorAll('[data-edit]').forEach(el=>{
     el.onclick = (ev)=>{ ev.stopPropagation(); openEditSheet(propById(el.dataset.edit)); };
   });
+  const bulkParkingBtn = document.getElementById('bulkParkingBtn');
+  if(bulkParkingBtn) bulkParkingBtn.onclick = openBulkParkingSheet;
   document.querySelectorAll('[data-del]').forEach(el=>{
     el.onclick = async (ev)=>{
       ev.stopPropagation();
