@@ -326,6 +326,7 @@ let state = {
   openIds: new Set(),
   editing: null, // property object being edited, or {} for new
   kakaoKey: null,
+  companyLocation: null,
   mapScope: 'today', // 'today' | 'all'
   mapReady: false,
   geocodeCache: {},
@@ -413,6 +414,67 @@ async function clearKakaoKey(){
   state.kakaoKey = null;
   state.mapReady = false;
   try{ await window.storage.delete('settings:kakaoKey', false); }catch(e){}
+}
+async function loadCompanyLocation(){
+  try{
+    const res = await window.storage.get('settings:companyLocation', false);
+    if(res && res.value){ state.companyLocation = JSON.parse(res.value); }
+  }catch(e){}
+}
+async function saveCompanyLocation(){
+  try{
+    if(state.companyLocation){
+      await window.storage.set('settings:companyLocation', JSON.stringify(state.companyLocation), false);
+    } else {
+      await window.storage.delete('settings:companyLocation', false);
+    }
+  }catch(e){}
+}
+function openCompanyLocationSheet(){
+  const cur = state.companyLocation || { name:'', address:'', owner:'', phone:'' };
+  const root = document.createElement('div');
+  root.className = 'overlay';
+  root.id = 'overlay';
+  root.innerHTML = `
+    <div class="sheet">
+      <h2>회사 위치 정보</h2>
+      <div class="field"><label>회사명</label><input id="cf_name" value="${esc(cur.name)}"></div>
+      <div class="field"><label>주소</label><input id="cf_address" value="${esc(cur.address)}"></div>
+      <div class="field"><label>대표</label><input id="cf_owner" value="${esc(cur.owner)}"></div>
+      <div class="field"><label>연락처</label><input id="cf_phone" value="${esc(cur.phone)}"></div>
+      <div class="sheet-actions">
+        <button class="cancel-btn" id="cancelCompany">취소</button>
+        <button class="save-btn" id="saveCompany">저장</button>
+      </div>
+      ${state.companyLocation ? `<button class="link-row" id="deleteCompany" style="background:none;border:none;color:var(--clay);font-size:12px;margin-top:10px;cursor:pointer;">회사 위치 삭제</button>` : ''}
+    </div>
+  `;
+  document.body.appendChild(root);
+  document.getElementById('cancelCompany').onclick = ()=> root.remove();
+  document.getElementById('saveCompany').onclick = async ()=>{
+    const address = document.getElementById('cf_address').value.trim();
+    if(!address){ alert('주소는 필수야.'); return; }
+    state.companyLocation = {
+      name: document.getElementById('cf_name').value.trim(),
+      address,
+      owner: document.getElementById('cf_owner').value.trim(),
+      phone: document.getElementById('cf_phone').value.trim(),
+    };
+    await saveCompanyLocation();
+    root.remove();
+    render();
+  };
+  const deleteBtn = document.getElementById('deleteCompany');
+  if(deleteBtn){
+    deleteBtn.onclick = async ()=>{
+      if(confirm('회사 위치 정보를 삭제할까?')){
+        state.companyLocation = null;
+        await saveCompanyLocation();
+        root.remove();
+        render();
+      }
+    };
+  }
 }
 async function loadGeocodeCache(){
   try{
@@ -804,7 +866,11 @@ function renderMapTab(){
     <div id="kakaoMapDiv"></div>
     <div class="map-hint">
       핀을 누르면 업체 이름이 떠. 주소가 바뀌었거나 위치가 이상하면 전체 업체 탭에서 주소를 다시 확인해줘.
-      <div class="link-row"><button id="changeKakaoKey">카카오 키 변경/삭제</button></div>
+      <div class="link-row">
+        <button id="setCompanyLocation">🏢 회사 위치 ${state.companyLocation ? '수정' : '등록'}</button>
+        <span style="margin:0 6px;color:var(--paper-line);">·</span>
+        <button id="changeKakaoKey">카카오 키 변경/삭제</button>
+      </div>
     </div>
   `;
 }
@@ -1060,7 +1126,7 @@ async function setupMapIfNeeded(){
     : state.properties.map(p=>p.id);
   const targets = targetIds.map(id=>propById(id)).filter(p=>p && p.address);
 
-  if(targets.length === 0){
+  if(targets.length === 0 && !state.companyLocation){
     container.innerHTML = '<div style="padding:16px;font-size:13px;color:var(--ink-soft);">표시할 업체가 없어. ' + (state.mapScope==='today' ? '먼저 "오늘" 탭에서 오늘의 리스트를 만들어줘.' : '') + '</div>';
     return;
   }
@@ -1093,6 +1159,35 @@ async function setupMapIfNeeded(){
     bounds.extend(pos);
     placed++;
   }
+
+  if(state.companyLocation){
+    const coord = await geocodeAddress(state.companyLocation.address);
+    if(coord){
+      const pos = new kakao.maps.LatLng(coord.lat, coord.lng);
+      const companyLabel = state.companyLocation.name || '회사';
+      const label = new kakao.maps.CustomOverlay({
+        position: pos, map, yAnchor: 1.4,
+        content: `<div style="background:#A6432A;color:#fff;font-size:11px;font-weight:700;padding:4px 8px;border-radius:6px;white-space:nowrap;">🏢 ${esc(companyLabel)}</div>`
+      });
+      const companyMarker = new kakao.maps.Marker({ position: pos, map });
+      kakao.maps.event.addListener(companyMarker, 'click', ()=>{
+        const navUrl = `https://map.kakao.com/link/to/${encodeURIComponent(companyLabel)},${coord.lat},${coord.lng}`;
+        const c = state.companyLocation;
+        infowindow.setContent(`
+          <div style="padding:8px 10px;font-size:12.5px;line-height:1.6;">
+            <div style="font-weight:700;margin-bottom:4px;">🏢 ${esc(companyLabel)}</div>
+            ${c.owner ? `<div>대표 ${esc(c.owner)}</div>` : ''}
+            ${c.phone ? `<div>${esc(c.phone)}</div>` : ''}
+            <a href="${navUrl}" target="_blank" rel="noopener" style="color:#2B6E63;text-decoration:underline;">🧭 길찾기</a>
+          </div>
+        `);
+        infowindow.open(map, companyMarker);
+      });
+      bounds.extend(pos);
+      placed++;
+    }
+  }
+
   await saveGeocodeCache();
 
   if(placed > 0){
@@ -1250,6 +1345,8 @@ function attachHandlers(){
       }
     };
   }
+  const setCompanyLocationBtn = document.getElementById('setCompanyLocation');
+  if(setCompanyLocationBtn) setCompanyLocationBtn.onclick = openCompanyLocationSheet;
   document.querySelectorAll('[data-scope]').forEach(el=>{
     el.onclick = ()=>{
       state.mapScope = el.dataset.scope;
@@ -1351,6 +1448,7 @@ document.getElementById('fab').onclick = ()=> openEditSheet(null);
   await loadTodayRecord();
   if(state.todayRecord) state.openJobIds = new Set(state.todayRecord.propertyIds);
   await loadKakaoKey();
+  await loadCompanyLocation();
   await loadGeocodeCache();
   await loadPhotoLog();
   await loadReportLog();
