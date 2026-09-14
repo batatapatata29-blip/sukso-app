@@ -1140,6 +1140,7 @@ async function setupMapIfNeeded(){
   const bounds = new kakao.maps.LatLngBounds();
   const infowindow = new kakao.maps.InfoWindow({ removable: true });
   let placed = 0;
+  let companyGeocodeFailed = false;
 
   for(const p of targets){
     const coord = await geocodeAddress(p.address);
@@ -1185,6 +1186,8 @@ async function setupMapIfNeeded(){
       });
       bounds.extend(pos);
       placed++;
+    } else {
+      companyGeocodeFailed = true;
     }
   }
 
@@ -1194,6 +1197,13 @@ async function setupMapIfNeeded(){
     map.setBounds(bounds);
   } else {
     container.innerHTML = '<div style="padding:16px;font-size:13px;color:var(--clay);">주소로 좌표를 찾지 못했어. 주소 표기를 다시 확인해줘.</div>';
+  }
+
+  if(companyGeocodeFailed){
+    const warn = document.createElement('div');
+    warn.style.cssText = 'margin-top:10px;padding:10px 12px;background:var(--clay-soft);color:var(--clay);border-radius:8px;font-size:12.5px;line-height:1.5;';
+    warn.textContent = '⚠️ 회사 위치 주소로 좌표를 찾지 못해서 핀이 안 떴어. "101호" 같은 호수를 빼고 건물 주소만 넣어서 다시 저장해봐.';
+    container.insertAdjacentElement('afterend', warn);
   }
 }
 
