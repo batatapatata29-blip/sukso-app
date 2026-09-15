@@ -1523,7 +1523,7 @@ async function createTodayList(){
     tasks[id] = tasksForProperty(p).map(text=>({text, done:false}));
   });
   state.todayRecord = { propertyIds: orderedIds, tasks, priorityIds: Array.from(state.pickerPriority) };
-  state.openJobIds = new Set(orderedIds);
+  state.openJobIds = new Set();
   state.calPasteText = '';
   state.calPasteResultMsg = '';
   state.pickerPriority = new Set();
@@ -1539,7 +1539,7 @@ document.getElementById('fab').onclick = ()=> openEditSheet(null);
 (async function init(){
   await loadProperties();
   await loadTodayRecord();
-  if(state.todayRecord) state.openJobIds = new Set(state.todayRecord.propertyIds);
+  // 오늘 리스트는 기본적으로 접힌 상태로 시작 (state.openJobIds는 빈 Set 그대로 둠)
   await loadKakaoKey();
   await loadCompanyLocation();
   await loadGeocodeCache();
