@@ -103,23 +103,34 @@
   }
   .job-card.done{border-left-color:var(--teal);opacity:0.72;}
   .job-card.priority{border-left-color:var(--clay);}
-  .job-head{display:flex;justify-content:space-between;align-items:center;gap:8px;cursor:pointer;}
+  .job-head{display:flex;align-items:center;gap:10px;cursor:pointer;}
   .job-addr-inline{
     display:block;font-size:12px;color:var(--teal);text-decoration:none;margin-top:2px;
     overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
   }
+  .nav-icon-btn{
+    flex-shrink:0;font-size:18px;text-decoration:none;padding:2px 4px;line-height:1;
+  }
+  .meta-addr{color:var(--teal);margin-bottom:4px;}
+  .order-cluster{display:flex;flex-direction:row;align-items:center;gap:4px;flex-shrink:0;}
   .order-num{
     flex-shrink:0;width:24px;height:24px;border-radius:50%;background:var(--ink);color:#fff;
     font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center;
   }
+  .job-title-block{display:flex;flex-direction:column;min-width:0;flex:1;}
   .job-detail{display:none;}
   .job-card.open .job-detail{display:block;}
-  .order-controls{display:flex;flex-direction:column;gap:2px;}
-  .order-controls button{
-    width:22px;height:18px;border:1px solid var(--paper-line);background:var(--surface);
-    border-radius:4px;font-size:10px;line-height:1;cursor:pointer;color:var(--ink-soft);padding:0;
+  .order-controls-mini{display:flex;flex-direction:column;gap:1px;}
+  .order-controls-mini button{
+    width:20px;height:14px;border:none;background:none;
+    font-size:8px;line-height:1;cursor:pointer;color:var(--ink-soft);padding:0;
   }
-  .order-controls button:disabled{opacity:0.3;cursor:default;}
+  .order-controls-mini button:disabled{opacity:0.25;cursor:default;}
+  .meta-line{
+    font-size:12px;color:var(--ink-soft);margin-top:10px;padding-bottom:10px;
+    border-bottom:1px solid var(--paper-line);
+  }
+  .section-divider{border-top:1px solid var(--paper-line);margin:12px 0;}
   .job-name{font-family:var(--serif);font-size:16px;font-weight:700;}
   .job-owner{font-size:12px;color:var(--ink-soft);margin-top:2px;}
   .badge-row{display:flex;gap:6px;flex-shrink:0;}
@@ -166,16 +177,16 @@
   .pw-value{font-family:var(--mono);font-size:13px;background:var(--clay-soft);color:var(--clay);padding:6px 10px;border-radius:6px;letter-spacing:0.3px;}
   .task-list{margin-top:12px;display:flex;flex-direction:row;gap:6px;}
   .task-item{
-    display:flex;flex-direction:row;align-items:center;justify-content:center;gap:6px;cursor:pointer;
-    border:1px solid var(--paper-line);border-radius:8px;padding:8px 6px;
-    background:var(--surface);flex:1;min-width:0;
+    display:flex;flex-direction:row;align-items:center;justify-content:flex-start;gap:6px;cursor:pointer;
+    border:none;border-radius:8px;padding:9px 8px;
+    background:var(--paper);flex:1;min-width:0;
   }
   .task-item .box{
-    width:16px;height:16px;border-radius:5px;border:1.5px solid var(--mustard);
+    width:16px;height:16px;border-radius:5px;border:1.5px solid var(--ink-soft);
     flex-shrink:0;display:flex;align-items:center;justify-content:center;
     font-size:11px;color:#fff;
   }
-  .task-item.done{background:var(--teal-soft);border-color:var(--teal);}
+  .task-item.done{background:var(--teal-soft);}
   .task-item.done .box{background:var(--teal);border-color:var(--teal);}
   .task-item .ttext{font-size:12.5px;line-height:1.3;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
   .task-item.done .ttext{color:var(--ink-soft);text-decoration:line-through;}
@@ -559,7 +570,7 @@ function openBulkParkingSheet(){
 }
 
 function openCompanyLocationSheet(){
-  const cur = state.companyLocation || { name:'', address:'', owner:'', phone:'' };
+  const cur = state.companyLocation || { name:'', address:'', owner:'', phone:'', carPlate:'' };
   const root = document.createElement('div');
   root.className = 'overlay';
   root.id = 'overlay';
@@ -570,6 +581,7 @@ function openCompanyLocationSheet(){
       <div class="field"><label>주소</label><input id="cf_address" value="${esc(cur.address)}"></div>
       <div class="field"><label>대표</label><input id="cf_owner" value="${esc(cur.owner)}"></div>
       <div class="field"><label>연락처</label><input id="cf_phone" value="${esc(cur.phone)}"></div>
+      <div class="field"><label>차량번호</label><input id="cf_carPlate" value="${esc(cur.carPlate||'')}" placeholder="예: 45어 4047"></div>
       <div class="sheet-actions">
         <button class="cancel-btn" id="cancelCompany">취소</button>
         <button class="save-btn" id="saveCompany">저장</button>
@@ -587,6 +599,7 @@ function openCompanyLocationSheet(){
       address,
       owner: document.getElementById('cf_owner').value.trim(),
       phone: document.getElementById('cf_phone').value.trim(),
+      carPlate: document.getElementById('cf_carPlate').value.trim(),
     };
     await saveCompanyLocation();
     root.remove();
@@ -669,6 +682,26 @@ function triggerCompletionReport(propertyId){
     render();
   };
   doShare();
+}
+
+function triggerLaundryReport(){
+  if(!state.todayRecord) return;
+  const d = new Date();
+  const dateLabel = `${d.getMonth()+1}/${d.getDate()}`;
+  const count = state.todayRecord.propertyIds.length;
+  const names = state.todayRecord.propertyIds.map(id => propById(id)).filter(Boolean).map(p=>p.name).join(', ');
+  const message = `[완료 보고] ${dateLabel} 오늘 세탁물 전달 전체 완료했습니다. (총 ${count}곳: ${names})`;
+  (async ()=>{
+    try{
+      if(navigator.share){
+        await navigator.share({ title: '완료 보고', text: message });
+      } else {
+        alert('이 브라우저에서는 자동 공유가 안 돼. 아래 문구를 복사해서 직접 보내줘.\n\n' + message);
+      }
+    }catch(err){
+      if(err && err.name === 'AbortError') return;
+    }
+  })();
 }
 
 async function loadWorkLog(){
@@ -763,6 +796,11 @@ function splitNotes(notes){
 }
 function kakaoMapUrl(address){
   return 'https://map.kakao.com/link/search/' + encodeURIComponent(address);
+}
+function taskIcon(text){
+  if(text.includes('세탁')) return '🧺';
+  if(text.includes('컨디션') || text.includes('사진')) return '✅';
+  return '✓';
 }
 function tasksForProperty(p){
   // 체크리스트는 고정 2항목. 참고사항은 별도로 그냥 텍스트로만 보여줌.
@@ -892,6 +930,11 @@ function renderToday(){
   const ids = state.todayRecord.propertyIds;
   const taskMap = state.todayRecord.tasks;
   const doneCount = ids.filter(id => taskMap[id].every(t=>t.done)).length;
+  const laundryAllDone = ids.length > 0 && ids.every(id=>{
+    const tasks = taskMap[id] || [];
+    const laundryTask = tasks.find(t=>t.text.includes('세탁'));
+    return laundryTask ? laundryTask.done : true;
+  });
 
   const cards = ids.map((id, cardIdx)=>{
     const p = propById(id);
@@ -908,41 +951,38 @@ function renderToday(){
     return `
       <div class="job-card ${isDone?'done':''} ${isPriority && !isDone ?'priority':''} ${state.openJobIds.has(id)?'open':''}">
         <div class="job-head" data-toggle-job="${id}">
-          <div style="display:flex;flex-direction:column;min-width:0;flex:1;">
-            <div style="display:flex;align-items:center;gap:8px;min-width:0;">
-              <span class="order-num">${cardIdx+1}</span>
-              <div class="job-name" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(p.name)}</div>
-              ${isPriority ? `<span class="badge" style="background:var(--clay-soft);color:var(--clay);flex-shrink:0;">🔴</span>` : ''}
-              ${isDone ? `<span class="badge" style="background:var(--teal-soft);color:var(--teal);flex-shrink:0;">✓</span>` : ''}
-            </div>
-            <a href="${kakaoMapUrl(p.address)}" target="_blank" rel="noopener" data-stop-toggle="1" class="job-addr-inline">🧭 ${esc(p.address)}</a>
-          </div>
-          <div style="display:flex;align-items:flex-start;gap:8px;flex-shrink:0;">
-            <div class="order-controls">
+          <div class="order-cluster">
+            <div class="order-controls-mini">
               <button data-move="${id}:-1" ${cardIdx===0?'disabled':''}>▲</button>
               <button data-move="${id}:1" ${cardIdx===ids.length-1?'disabled':''}>▼</button>
             </div>
+            <span class="order-num">${cardIdx+1}</span>
           </div>
+          <div class="job-title-block">
+            <div style="display:flex;align-items:center;gap:6px;min-width:0;">
+              <div class="job-name" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(p.name)}</div>
+              ${isPriority ? `<span class="badge" style="background:var(--clay-soft);color:var(--clay);flex-shrink:0;font-size:10px;font-weight:700;">당일</span>` : ''}
+              ${tasks.filter(t=>t.done).map(t=>`<span class="badge" style="background:var(--teal-soft);color:var(--teal);flex-shrink:0;">${taskIcon(t.text)}</span>`).join('')}
+            </div>
+          </div>
+          <a href="${kakaoMapUrl(p.address)}" target="_blank" rel="noopener" data-stop-toggle="1" class="nav-icon-btn">🧭</a>
         </div>
         <div class="job-detail">
-          <div class="badge-row" style="margin-top:8px;flex-wrap:wrap;">
-            <span class="badge">OUT ${esc(p.out)}</span>
-            <span class="badge">IN ${esc(p.in)}</span>
-            ${p.rooms ? `<span class="badge" style="background:var(--teal-soft);color:var(--teal);">🚪 룸/화장실 ${esc(p.rooms)}</span>` : ''}
-            ${p.beds ? `<span class="badge" style="background:var(--teal-soft);color:var(--teal);">🛏 ${esc(p.beds)}</span>` : ''}
+          <div class="meta-line">
+            <div class="meta-addr">🧭 ${esc(p.address)}</div>
+            <div>OUT ${esc(p.out)} · IN ${esc(p.in)}${p.rooms ? ` · 룸/화장실 ${esc(p.rooms)}` : ''}${p.beds ? ` · ${esc(p.beds)}` : ''}</div>
           </div>
           <div class="pw-row">
             <span class="pw-icon">🔑</span>
             <input class="pw-edit" data-pw-edit="${id}" value="${esc(p.password)}" placeholder="비밀번호 없음">
           </div>
           ${p.parkingUrl ? `<div class="job-row" style="margin-top:8px;"><a class="pill-btn" href="${esc(p.parkingUrl)}" target="_blank" rel="noopener">🚗 주차등록${(p.parkingId||p.parkingPw)?` (${esc(p.parkingId)}/${esc(p.parkingPw)})`:''}</a></div>` : ''}
-          <div class="task-list">${taskRows}</div>
           <div class="notes-row">
             <span class="pw-icon">📋</span>
             <textarea class="notes-edit" data-notes-edit="${id}" placeholder="참고사항 없음">${esc(p.notes)}</textarea>
           </div>
-          ${isDone ? `<div class="job-row" style="margin-top:10px;"><button class="pill-btn" data-report="${id}" style="background:var(--teal-soft);color:var(--teal);">📨 완료 보고하기</button></div>` : ''}
-          ${lastReportFor(id) ? `<div class="task-meta">최근 보고: ${formatSendTime(lastReportFor(id).ts)}</div>` : ''}
+          <div class="section-divider"></div>
+          <div class="task-list">${taskRows}</div>
         </div>
       </div>
     `;
@@ -960,6 +1000,7 @@ function renderToday(){
         <button class="relist-btn" id="openTomorrowPicker">📅 내일 리스트 준비</button>
       </div>
     </div>
+    ${laundryAllDone ? `<button class="export-btn" id="laundryReportBtn" style="margin-top:0;margin-bottom:14px;background:var(--teal);">🧺 세탁물 전달 완료 보고하기</button>` : ''}
     ${cards}
   `;
 }
@@ -1034,6 +1075,7 @@ function renderMapTab(){
     <div id="kakaoMapDiv"></div>
     <div class="map-hint">
       핀을 누르면 업체 이름이 떠. 주소가 바뀌었거나 위치가 이상하면 전체 업체 탭에서 주소를 다시 확인해줘.
+      ${state.companyLocation && state.companyLocation.carPlate ? `<div style="margin-top:6px;">🚗 회사차: <b style="color:var(--ink);">${esc(state.companyLocation.carPlate)}</b></div>` : ''}
       <div class="link-row">
         <button id="setCompanyLocation">🏢 회사 위치 ${state.companyLocation ? '수정' : '등록'}</button>
         <span style="margin:0 6px;color:var(--paper-line);">·</span>
@@ -1373,6 +1415,7 @@ async function setupMapIfNeeded(){
             <div style="font-weight:700;margin-bottom:4px;">🏢 ${esc(companyLabel)}</div>
             ${c.owner ? `<div>대표 ${esc(c.owner)}</div>` : ''}
             ${c.phone ? `<div>${esc(c.phone)}</div>` : ''}
+            ${c.carPlate ? `<div>🚗 ${esc(c.carPlate)}</div>` : ''}
             <a href="${navUrl}" target="_blank" rel="noopener" style="color:#2B6E63;text-decoration:underline;">🧭 길찾기</a>
           </div>
         `);
@@ -1428,6 +1471,8 @@ function attachHandlers(){
   if(cancelTomorrowBtn) cancelTomorrowBtn.onclick = closeTomorrowPicker;
   const openTomorrowBtn = document.getElementById('openTomorrowPicker');
   if(openTomorrowBtn) openTomorrowBtn.onclick = openTomorrowPicker;
+  const laundryReportBtn = document.getElementById('laundryReportBtn');
+  if(laundryReportBtn) laundryReportBtn.onclick = triggerLaundryReport;
 
   const calPasteMatch = document.getElementById('calPasteMatch');
   if(calPasteMatch){
