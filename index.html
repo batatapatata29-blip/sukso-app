@@ -110,8 +110,6 @@
   }
   .job-detail{display:none;}
   .job-card.open .job-detail{display:block;}
-  .job-card .chevron{font-size:11px;color:var(--ink-soft);transition:transform .15s;}
-  .job-card.open .chevron{transform:rotate(90deg);}
   .order-controls{display:flex;flex-direction:column;gap:2px;}
   .order-controls button{
     width:22px;height:18px;border:1px solid var(--paper-line);background:var(--surface);
@@ -340,6 +338,7 @@ let state = {
   calPasteText: '',
   calPasteResultMsg: '',
   pasteMatchOrder: [],
+  tomorrowPickerOpen: false,
   search: '',
   openIds: new Set(),
   editing: null, // property object being edited, or {} for new
@@ -838,31 +837,46 @@ async function stepClockTime(field, delta){
   render();
 }
 
-function renderToday(){
-  if(!state.todayRecord){
-    const rows = state.properties.map(p=>`
-      <label class="picker-row ${state.pickerSelection.has(p.id)?'checked':''}" data-pick="${p.id}">
-        <input type="checkbox" ${state.pickerSelection.has(p.id)?'checked':''} data-pick-cb="${p.id}">
-        <div style="flex:1;">
-          <div class="pname">${esc(p.name)}</div>
-          <div class="paddr">${esc(p.address)}</div>
-        </div>
-        <button class="priority-toggle ${state.pickerPriority.has(p.id)?'active':''}" data-priority="${p.id}">🔴 당일체크인</button>
-      </label>
-    `).join('');
-    return `
-      ${renderClockCard()}
-      <div class="picker-intro">오늘(${renderDateLabel()}) 방문할 업체를 골라줘. 업체별 참고사항이 자동으로 체크리스트가 돼.</div>
-      <div class="paste-box">
-        <label>일정·순서 메시지 붙여넣기 (선택)</label>
-        <textarea id="calPasteBox" placeholder="캘린더 일정이나 &quot;동교로25길 301호-망원2룸-...&quot;처럼 순서대로 적힌 메시지를 붙여넣어봐">${esc(state.calPasteText)}</textarea>
-        <button id="calPasteMatch">비슷한 이름 자동 선택 (순서도 그대로 적용)</button>
+function renderPickerBody(mode){
+  const isTomorrow = mode === 'tomorrow';
+  const rows = state.properties.map(p=>`
+    <label class="picker-row ${state.pickerSelection.has(p.id)?'checked':''}" data-pick="${p.id}">
+      <input type="checkbox" ${state.pickerSelection.has(p.id)?'checked':''} data-pick-cb="${p.id}">
+      <div style="flex:1;">
+        <div class="pname">${esc(p.name)}</div>
+        <div class="paddr">${esc(p.address)}</div>
       </div>
-      <div class="picker-list">${rows}</div>
-      <div id="calPasteResult" style="font-size:12px;color:var(--ink-soft);margin:-6px 0 12px 0;">${esc(state.calPasteResultMsg)}</div>
+      <button class="priority-toggle ${state.pickerPriority.has(p.id)?'active':''}" data-priority="${p.id}">🔴 당일체크인</button>
+    </label>
+  `).join('');
+  const dateLabel = isTomorrow ? tomorrowLabel() : renderDateLabel();
+  const dayWord = isTomorrow ? '내일' : '오늘';
+  return `
+    ${!isTomorrow ? renderClockCard() : `<div class="picker-intro" style="margin-bottom:0;">📅 <b>내일(${dateLabel}) 리스트 준비 중</b> — 오늘 리스트랑은 별개로 저장돼.</div>`}
+    <div class="picker-intro">${dayWord}(${dateLabel}) 방문할 업체를 골라줘. 업체별 참고사항이 자동으로 체크리스트가 돼.</div>
+    <div class="paste-box">
+      <label>일정·순서 메시지 붙여넣기 (선택)</label>
+      <textarea id="calPasteBox" placeholder="캘린더 일정이나 &quot;동교로25길 301호-망원2룸-...&quot;처럼 순서대로 적힌 메시지를 붙여넣어봐">${esc(state.calPasteText)}</textarea>
+      <button id="calPasteMatch">비슷한 이름 자동 선택 (순서도 그대로 적용)</button>
+    </div>
+    <div class="picker-list">${rows}</div>
+    <div id="calPasteResult" style="font-size:12px;color:var(--ink-soft);margin:-6px 0 12px 0;">${esc(state.calPasteResultMsg)}</div>
+    ${isTomorrow ? `
+      <button class="confirm-btn" id="confirmTomorrowPick" ${state.pickerSelection.size===0?'disabled':''}>내일의 리스트 만들기 (${state.pickerSelection.size})</button>
+      <button class="export-btn" id="cancelTomorrowPick" style="margin-top:8px;background:var(--surface);color:var(--ink);border:1px solid var(--paper-line);">취소하고 돌아가기</button>
+    ` : `
       <button class="confirm-btn" id="confirmPick" ${state.pickerSelection.size===0?'disabled':''}>오늘의 리스트 만들기 (${state.pickerSelection.size})</button>
-      <button class="export-btn" id="confirmTomorrowPick" ${state.pickerSelection.size===0?'disabled':''} style="margin-top:8px;background:var(--surface);color:var(--ink);border:1px solid var(--paper-line);">내일(${tomorrowLabel()}) 리스트로 미리 만들기</button>
-    `;
+      <div style="text-align:center;margin-top:10px;"><button class="relist-btn" id="openTomorrowPicker">📅 내일 리스트 미리 준비하기</button></div>
+    `}
+  `;
+}
+
+function renderToday(){
+  if(state.tomorrowPickerOpen){
+    return renderPickerBody('tomorrow');
+  }
+  if(!state.todayRecord){
+    return renderPickerBody('today');
   }
 
   const ids = state.todayRecord.propertyIds;
@@ -895,13 +909,12 @@ function renderToday(){
               <button data-move="${id}:-1" ${cardIdx===0?'disabled':''}>▲</button>
               <button data-move="${id}:1" ${cardIdx===ids.length-1?'disabled':''}>▼</button>
             </div>
-            <span class="badge">IN ${esc(p.in)}</span>
-            <span class="chevron">▶</span>
           </div>
         </div>
         <div class="job-detail">
           <div class="badge-row" style="margin-top:8px;flex-wrap:wrap;">
             <span class="badge">OUT ${esc(p.out)}</span>
+            <span class="badge">IN ${esc(p.in)}</span>
             ${p.rooms ? `<span class="badge" style="background:var(--teal-soft);color:var(--teal);">🚪 룸/화장실 ${esc(p.rooms)}</span>` : ''}
             ${p.beds ? `<span class="badge" style="background:var(--teal-soft);color:var(--teal);">🛏 ${esc(p.beds)}</span>` : ''}
           </div>
@@ -931,7 +944,10 @@ function renderToday(){
         <div class="date">${renderDateLabel()}</div>
         <div class="count"><span>${doneCount}</span> / ${ids.length} 완료</div>
       </div>
-      <button class="relist-btn" id="relist">오늘 리스트 다시 선택</button>
+      <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end;">
+        <button class="relist-btn" id="relist">오늘 리스트 다시 선택</button>
+        <button class="relist-btn" id="openTomorrowPicker">📅 내일 리스트 준비</button>
+      </div>
     </div>
     ${cards}
   `;
@@ -1397,6 +1413,10 @@ function attachHandlers(){
   if(confirmBtn) confirmBtn.onclick = createTodayList;
   const confirmTomorrowBtn = document.getElementById('confirmTomorrowPick');
   if(confirmTomorrowBtn) confirmTomorrowBtn.onclick = createTomorrowList;
+  const cancelTomorrowBtn = document.getElementById('cancelTomorrowPick');
+  if(cancelTomorrowBtn) cancelTomorrowBtn.onclick = closeTomorrowPicker;
+  const openTomorrowBtn = document.getElementById('openTomorrowPicker');
+  if(openTomorrowBtn) openTomorrowBtn.onclick = openTomorrowPicker;
 
   const calPasteMatch = document.getElementById('calPasteMatch');
   if(calPasteMatch){
@@ -1673,19 +1693,34 @@ async function createTodayList(){
   render();
 }
 
+function openTomorrowPicker(){
+  state.tomorrowPickerOpen = true;
+  state.pickerSelection = new Set();
+  state.pickerPriority = new Set();
+  state.pasteMatchOrder = [];
+  state.calPasteText = '';
+  state.calPasteResultMsg = '';
+  render();
+}
+function closeTomorrowPicker(){
+  state.tomorrowPickerOpen = false;
+  state.pickerSelection = new Set();
+  state.pickerPriority = new Set();
+  state.pasteMatchOrder = [];
+  state.calPasteText = '';
+  state.calPasteResultMsg = '';
+  render();
+}
+
 async function createTomorrowList(){
   if(state.pickerSelection.size === 0) return;
   const record = buildOrderedRecord();
   try{
     await window.storage.set('today:' + tomorrowStr(), JSON.stringify(record), false);
   }catch(e){}
-  state.calPasteText = '';
-  state.calPasteResultMsg = '';
-  state.pickerPriority = new Set();
-  state.pasteMatchOrder = [];
-  state.pickerSelection = new Set();
-  render();
-  alert(`내일(${tomorrowLabel()}) 리스트를 미리 만들어놨어. 내일 앱을 열면 바로 보일 거야.`);
+  const label = tomorrowLabel();
+  closeTomorrowPicker();
+  alert(`내일(${label}) 리스트를 미리 만들어놨어. 내일 앱을 열면 바로 보일 거야.`);
 }
 
 document.querySelectorAll('.tab').forEach(t=>{
