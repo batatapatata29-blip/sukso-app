@@ -175,6 +175,7 @@
     font-family:var(--sans);display:inline-flex;align-items:center;gap:4px;
   }
   .pw-value{font-family:var(--mono);font-size:13px;background:var(--clay-soft);color:var(--clay);padding:6px 10px;border-radius:6px;letter-spacing:0.3px;}
+  .parking-link{font-size:13px;color:var(--teal);text-decoration:none;}
   .task-list{margin-top:12px;display:flex;flex-direction:row;gap:6px;}
   .task-item{
     display:flex;flex-direction:row;align-items:center;justify-content:flex-start;gap:6px;cursor:pointer;
@@ -356,6 +357,7 @@ let state = {
   pickerSelection: new Set(),
   pickerPriority: new Set(),
   openJobIds: new Set(),
+  toolsOpen: false,
   calPasteText: '',
   calPasteResultMsg: '',
   pasteMatchOrder: [],
@@ -901,7 +903,6 @@ function renderPickerBody(mode){
   const dayWord = isTomorrow ? '내일' : '오늘';
   return `
     ${!isTomorrow ? renderClockCard() : `<div class="picker-intro" style="margin-bottom:0;">📅 <b>내일(${dateLabel}) 리스트 준비 중</b> — 오늘 리스트랑은 별개로 저장돼.</div>`}
-    <div class="picker-intro">${dayWord}(${dateLabel}) 방문할 업체를 골라줘. 업체별 참고사항이 자동으로 체크리스트가 돼.</div>
     <div class="paste-box">
       <label>일정·순서 메시지 붙여넣기 (선택)</label>
       <textarea id="calPasteBox" placeholder="캘린더 일정이나 &quot;동교로25길 301호-망원2룸-...&quot;처럼 순서대로 적힌 메시지를 붙여넣어봐">${esc(state.calPasteText)}</textarea>
@@ -976,11 +977,18 @@ function renderToday(){
             <span class="pw-icon">🔑</span>
             <input class="pw-edit" data-pw-edit="${id}" value="${esc(p.password)}" placeholder="비밀번호 없음">
           </div>
-          ${p.parkingUrl ? `<div class="job-row" style="margin-top:8px;"><a class="pill-btn" href="${esc(p.parkingUrl)}" target="_blank" rel="noopener">🚗 주차등록${(p.parkingId||p.parkingPw)?` (${esc(p.parkingId)}/${esc(p.parkingPw)})`:''}</a></div>` : ''}
           <div class="notes-row">
             <span class="pw-icon">📋</span>
             <textarea class="notes-edit" data-notes-edit="${id}" placeholder="참고사항 없음">${esc(p.notes)}</textarea>
           </div>
+          ${p.parkingUrl ? `
+          <div class="pw-row">
+            <span class="pw-icon">🚗</span>
+            <div style="flex:1;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+              <a href="${esc(p.parkingUrl)}" target="_blank" rel="noopener" class="parking-link">주차등록 사이트 열기</a>
+              ${(p.parkingId||p.parkingPw) ? `<span class="pw-value">${esc(p.parkingId)} / ${esc(p.parkingPw)}</span>` : ''}
+            </div>
+          </div>` : ''}
           <div class="section-divider"></div>
           <div class="task-list">${taskRows}</div>
         </div>
@@ -1049,8 +1057,15 @@ function renderAll(){
 
   return `
     <input class="search-box" id="searchBox" placeholder="상호명·담당자·주소로 검색" value="${esc(state.search)}">
-    <button class="pill-btn" id="bulkParkingBtn" style="margin-bottom:8px;">🚗 여러 업체에 주차등록 정보 한번에 적용</button>
-    <button class="pill-btn" id="cleanupAddressBtn" style="margin-bottom:12px;">🧹 주소 띄어쓰기 한번에 정리</button>
+    <div style="margin-bottom:12px;">
+      <button class="relist-btn" id="toggleTools">⚙️ 관리 도구 ${state.toolsOpen ? '▲' : '▼'}</button>
+      ${state.toolsOpen ? `
+        <div style="margin-top:8px;display:flex;flex-direction:column;gap:8px;">
+          <button class="pill-btn" id="bulkParkingBtn">🚗 여러 업체에 주차등록 정보 한번에 적용</button>
+          <button class="pill-btn" id="cleanupAddressBtn">🧹 주소 띄어쓰기 한번에 정리</button>
+        </div>
+      ` : ''}
+    </div>
     ${list.length ? cards : `<div class="empty">검색 결과가 없어.<br>다른 검색어로 찾아봐.</div>`}
   `;
 }
@@ -1568,6 +1583,8 @@ function attachHandlers(){
   if(bulkParkingBtn) bulkParkingBtn.onclick = openBulkParkingSheet;
   const cleanupAddressBtn = document.getElementById('cleanupAddressBtn');
   if(cleanupAddressBtn) cleanupAddressBtn.onclick = cleanupAddressSpacing;
+  const toggleToolsBtn = document.getElementById('toggleTools');
+  if(toggleToolsBtn) toggleToolsBtn.onclick = ()=>{ state.toolsOpen = !state.toolsOpen; render(); };
   document.querySelectorAll('[data-del]').forEach(el=>{
     el.onclick = async (ev)=>{
       ev.stopPropagation();
