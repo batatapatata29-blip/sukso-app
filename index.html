@@ -141,6 +141,12 @@
   .clock-label{font-size:11px;color:var(--ink-soft);font-weight:600;}
   .clock-btn{width:100%;background:var(--ink);color:#fff;border:none;border-radius:8px;padding:9px 0;font-size:13px;font-weight:700;cursor:pointer;font-family:var(--sans);}
   .clock-time-edit{width:100%;font-family:var(--mono);font-size:14px;border:1px solid var(--paper-line);border-radius:8px;padding:6px 8px;background:var(--paper);color:var(--ink);}
+  .time-stepper{display:flex;align-items:center;gap:4px;}
+  .time-stepper .clock-time-edit{flex:1;text-align:center;padding:6px 2px;}
+  .time-stepper button{
+    flex-shrink:0;width:30px;height:30px;border:1px solid var(--paper-line);background:var(--surface);
+    border-radius:6px;font-size:11px;font-weight:700;color:var(--ink-soft);cursor:pointer;font-family:var(--mono);
+  }
   .clock-dim{font-size:13px;color:var(--ink-soft);padding:6px 0;}
   .clock-duration{margin-top:8px;font-size:12px;color:var(--teal);font-weight:600;}
   .job-row{display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap;}
@@ -312,6 +318,17 @@ const todayStr = () => {
   return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
 };
 const todayKey = () => 'today:' + todayStr();
+const tomorrowStr = () => {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+};
+function tomorrowLabel(){
+  const [y,m,d] = tomorrowStr().split('-').map(Number);
+  const days = ['일','월','화','수','목','금','토'];
+  const wd = new Date(y, m-1, d).getDay();
+  return `${m}월 ${d}일 (${days[wd]})`;
+}
 
 let state = {
   tab: 'today',
@@ -322,6 +339,7 @@ let state = {
   openJobIds: new Set(),
   calPasteText: '',
   calPasteResultMsg: '',
+  pasteMatchOrder: [],
   search: '',
   openIds: new Set(),
   editing: null, // property object being edited, or {} for new
@@ -430,6 +448,27 @@ async function saveCompanyLocation(){
     }
   }catch(e){}
 }
+function normalizeAddressSpacing(address){
+  if(!address) return address;
+  // "로" 뒤에 바로 건물번호 숫자가 오면 띄어씀. 단 "OO로25길"처럼 로 다음이 길로 이어지는
+  // 도로명(번길)은 규정상 붙여 쓰는 게 맞아서 그대로 둠.
+  let a = address.replace(/(로)(\d+)(?!\d)(?!길)/g, '$1 $2');
+  a = a.replace(/(길)(\d+)(?!\d)/g, '$1 $2');
+  return a;
+}
+
+async function cleanupAddressSpacing(){
+  let changed = 0;
+  state.properties = state.properties.map(p=>{
+    const fixed = normalizeAddressSpacing(p.address);
+    if(fixed !== p.address) changed++;
+    return { ...p, address: fixed };
+  });
+  await saveProperties();
+  render();
+  alert(changed > 0 ? `${changed}곳 주소 띄어쓰기를 정리했어.` : '이미 다 정리돼 있어서 바뀐 게 없어.');
+}
+
 function openBulkParkingSheet(){
   const selected = new Set();
   const root = document.createElement('div');
@@ -763,21 +802,40 @@ function renderClockCard(){
         <div class="clock-item">
           <span class="clock-label">출근</span>
           ${entry.clockIn
-            ? `<input type="time" class="clock-time-edit" data-clock-edit="in" value="${entry.clockIn}">`
-            : `<button class="clock-btn" data-clock-action="in">🕒 출근하기</button>`}
+            ? `<div class="time-stepper">
+                 <button data-step="clockIn:-10">−10</button>
+                 <input type="time" class="clock-time-edit" data-clock-edit="in" value="${entry.clockIn}">
+                 <button data-step="clockIn:10">+10</button>
+               </div>`
+            : `<button class="clock-btn" data-clock-action="in">🕒 출근하기 (10:00)</button>`}
         </div>
         <div class="clock-item">
           <span class="clock-label">퇴근</span>
           ${entry.clockOut
-            ? `<input type="time" class="clock-time-edit" data-clock-edit="out" value="${entry.clockOut}">`
+            ? `<div class="time-stepper">
+                 <button data-step="clockOut:-10">−10</button>
+                 <input type="time" class="clock-time-edit" data-clock-edit="out" value="${entry.clockOut}">
+                 <button data-step="clockOut:10">+10</button>
+               </div>`
             : (entry.clockIn
-                ? `<button class="clock-btn" data-clock-action="out">🏁 퇴근하기</button>`
+                ? `<button class="clock-btn" data-clock-action="out">🏁 퇴근하기 (16:00)</button>`
                 : `<span class="clock-dim">출근 후 가능</span>`)}
         </div>
       </div>
       ${entry.clockIn && entry.clockOut ? `<div class="clock-duration">오늘 근무 시간: ${formatDuration(entry.clockIn, entry.clockOut)}</div>` : ''}
     </div>
   `;
+}
+
+async function stepClockTime(field, delta){
+  const entry = getWorkEntry(todayStr()) || { clockIn: null, clockOut: null };
+  const cur = entry[field] || nowHHMM();
+  const [h, m] = cur.split(':').map(Number);
+  let total = ((h*60 + m + delta) % 1440 + 1440) % 1440;
+  const nh = Math.floor(total/60), nm = total%60;
+  const newVal = `${String(nh).padStart(2,'0')}:${String(nm).padStart(2,'0')}`;
+  await upsertWorkEntry(todayStr(), { [field]: newVal });
+  render();
 }
 
 function renderToday(){
@@ -796,13 +854,14 @@ function renderToday(){
       ${renderClockCard()}
       <div class="picker-intro">오늘(${renderDateLabel()}) 방문할 업체를 골라줘. 업체별 참고사항이 자동으로 체크리스트가 돼.</div>
       <div class="paste-box">
-        <label>네이버 캘린더 일정 붙여넣기 (선택)</label>
-        <textarea id="calPasteBox" placeholder="캘린더에서 오늘 날짜 일정 텍스트를 복사해서 여기에 붙여넣어봐">${esc(state.calPasteText)}</textarea>
-        <button id="calPasteMatch">비슷한 이름 자동 선택</button>
+        <label>일정·순서 메시지 붙여넣기 (선택)</label>
+        <textarea id="calPasteBox" placeholder="캘린더 일정이나 &quot;동교로25길 301호-망원2룸-...&quot;처럼 순서대로 적힌 메시지를 붙여넣어봐">${esc(state.calPasteText)}</textarea>
+        <button id="calPasteMatch">비슷한 이름 자동 선택 (순서도 그대로 적용)</button>
       </div>
       <div class="picker-list">${rows}</div>
       <div id="calPasteResult" style="font-size:12px;color:var(--ink-soft);margin:-6px 0 12px 0;">${esc(state.calPasteResultMsg)}</div>
       <button class="confirm-btn" id="confirmPick" ${state.pickerSelection.size===0?'disabled':''}>오늘의 리스트 만들기 (${state.pickerSelection.size})</button>
+      <button class="export-btn" id="confirmTomorrowPick" ${state.pickerSelection.size===0?'disabled':''} style="margin-top:8px;background:var(--surface);color:var(--ink);border:1px solid var(--paper-line);">내일(${tomorrowLabel()}) 리스트로 미리 만들기</button>
     `;
   }
 
@@ -922,7 +981,8 @@ function renderAll(){
 
   return `
     <input class="search-box" id="searchBox" placeholder="상호명·담당자·주소로 검색" value="${esc(state.search)}">
-    <button class="pill-btn" id="bulkParkingBtn" style="margin-bottom:12px;">🚗 여러 업체에 주차등록 정보 한번에 적용</button>
+    <button class="pill-btn" id="bulkParkingBtn" style="margin-bottom:8px;">🚗 여러 업체에 주차등록 정보 한번에 적용</button>
+    <button class="pill-btn" id="cleanupAddressBtn" style="margin-bottom:12px;">🧹 주소 띄어쓰기 한번에 정리</button>
     ${list.length ? cards : `<div class="empty">검색 결과가 없어.<br>다른 검색어로 찾아봐.</div>`}
   `;
 }
@@ -1171,15 +1231,41 @@ function loadKakaoSDK(key){
   return kakaoSDKPromise;
 }
 
+function cleanAddressForGeocode(address){
+  if(!address) return address;
+  let a = address.trim();
+  // "도로명 156, 1408호"처럼 콤마 뒤에 호수가 붙은 경우 콤마 앞부분만 사용
+  const commaIdx = a.lastIndexOf(',');
+  if(commaIdx > 0){
+    return a.slice(0, commaIdx).trim();
+  }
+  // "4-17 102호" / "483-33 201호" / "b동201호" 처럼 끝에 붙은 호수/층 제거
+  const stripped = a.replace(/\s*[a-zA-Z0-9]*\s*\d+\s*(호|층)\s*$/, '').trim();
+  return stripped || a;
+}
+
 function geocodeAddress(address){
   if(state.geocodeCache[address]) return Promise.resolve(state.geocodeCache[address]);
+  const geocoder = new kakao.maps.services.Geocoder();
   return new Promise((resolve)=>{
-    const geocoder = new kakao.maps.services.Geocoder();
-    geocoder.addressSearch(address, (result, status)=>{
-      if(status === kakao.maps.services.Status.OK && result[0]){
-        const coord = { lat: Number(result[0].y), lng: Number(result[0].x) };
-        state.geocodeCache[address] = coord;
-        resolve(coord);
+    const tryGeocode = (addr, onFail)=>{
+      geocoder.addressSearch(addr, (result, status)=>{
+        if(status === kakao.maps.services.Status.OK && result[0]){
+          const coord = { lat: Number(result[0].y), lng: Number(result[0].x) };
+          state.geocodeCache[address] = coord; // 원본 주소를 키로 캐싱
+          resolve(coord);
+        } else if(onFail){
+          onFail();
+        } else {
+          resolve(null);
+        }
+      });
+    };
+    // 1차: 원본 주소 그대로 시도, 실패하면 호수/층 뗀 주소로 재시도
+    tryGeocode(address, ()=>{
+      const cleaned = cleanAddressForGeocode(address);
+      if(cleaned && cleaned !== address){
+        tryGeocode(cleaned, ()=> resolve(null));
       } else {
         resolve(null);
       }
@@ -1309,6 +1395,8 @@ function attachHandlers(){
   });
   const confirmBtn = document.getElementById('confirmPick');
   if(confirmBtn) confirmBtn.onclick = createTodayList;
+  const confirmTomorrowBtn = document.getElementById('confirmTomorrowPick');
+  if(confirmTomorrowBtn) confirmTomorrowBtn.onclick = createTomorrowList;
 
   const calPasteMatch = document.getElementById('calPasteMatch');
   if(calPasteMatch){
@@ -1354,8 +1442,8 @@ function attachHandlers(){
   document.querySelectorAll('[data-clock-action]').forEach(el=>{
     el.onclick = async ()=>{
       const action = el.dataset.clockAction;
-      if(action === 'in') await upsertWorkEntry(todayStr(), { clockIn: nowHHMM() });
-      else await upsertWorkEntry(todayStr(), { clockOut: nowHHMM() });
+      if(action === 'in') await upsertWorkEntry(todayStr(), { clockIn: '10:00' });
+      else await upsertWorkEntry(todayStr(), { clockOut: '16:00' });
       render();
     };
   });
@@ -1364,6 +1452,12 @@ function attachHandlers(){
       const field = el.dataset.clockEdit === 'in' ? 'clockIn' : 'clockOut';
       await upsertWorkEntry(todayStr(), { [field]: el.value });
       render();
+    };
+  });
+  document.querySelectorAll('[data-step]').forEach(el=>{
+    el.onclick = ()=>{
+      const [field, delta] = el.dataset.step.split(':');
+      stepClockTime(field, Number(delta));
     };
   });
 
@@ -1387,6 +1481,8 @@ function attachHandlers(){
   });
   const bulkParkingBtn = document.getElementById('bulkParkingBtn');
   if(bulkParkingBtn) bulkParkingBtn.onclick = openBulkParkingSheet;
+  const cleanupAddressBtn = document.getElementById('cleanupAddressBtn');
+  if(cleanupAddressBtn) cleanupAddressBtn.onclick = cleanupAddressSpacing;
   document.querySelectorAll('[data-del]').forEach(el=>{
     el.onclick = async (ev)=>{
       ev.stopPropagation();
@@ -1473,23 +1569,56 @@ function togglePick(id){
 function normalizeForMatch(s){
   return (s||'').replace(/\s+/g,'').toLowerCase();
 }
+function levenshteinDistance(a, b){
+  const dp = [];
+  for(let i=0;i<=a.length;i++){ dp.push([i, ...Array(b.length).fill(0)]); }
+  for(let j=0;j<=b.length;j++) dp[0][j] = j;
+  for(let i=1;i<=a.length;i++){
+    for(let j=1;j<=b.length;j++){
+      dp[i][j] = a[i-1]===b[j-1] ? dp[i-1][j-1] : 1 + Math.min(dp[i-1][j-1], dp[i-1][j], dp[i][j-1]);
+    }
+  }
+  return dp[a.length][b.length];
+}
+function findBestPropertyMatch(line){
+  const normLine = normalizeForMatch(line);
+  // 1차: 포함 관계로 정확히 찾히는 것 우선 (더 짧게 일치하는 쪽이 더 정확한 매칭)
+  let best = null;
+  state.properties.forEach(p=>{
+    const normName = normalizeForMatch(p.name);
+    if(normName.includes(normLine) || normLine.includes(normName)){
+      if(!best || normName.length < normalizeForMatch(best.name).length) best = p;
+    }
+  });
+  if(best) return best;
+  // 2차: 축약/오타 허용 - 편집거리(유사도) 기준으로 가장 가까운 것 사용
+  let bestDist = Infinity, bestP = null;
+  state.properties.forEach(p=>{
+    const normName = normalizeForMatch(p.name);
+    const d = levenshteinDistance(normLine, normName);
+    if(d < bestDist){ bestDist = d; bestP = p; }
+  });
+  const threshold = Math.max(2, Math.floor(normLine.length * 0.4));
+  return (bestP && bestDist <= threshold) ? bestP : null;
+}
 function matchPastedCalendar(text){
-  const lines = text.split('\n').map(l=>l.trim()).filter(l=>l.length>=2);
+  // 줄바꿈뿐 아니라 "-", "·", "," 로 구분된 순서 메시지도 인식
+  const lines = text.split(/[\n\-,·/]+/).map(l=>l.trim()).filter(l=>l.length>=2);
   let matchedCount = 0;
   const matchedNames = [];
+  const orderedIds = [];
   lines.forEach(line=>{
-    const normLine = normalizeForMatch(line);
-    state.properties.forEach(p=>{
-      const normName = normalizeForMatch(p.name);
-      if(normName.includes(normLine) || normLine.includes(normName)){
-        if(!state.pickerSelection.has(p.id)){
-          state.pickerSelection.add(p.id);
-          matchedCount++;
-          matchedNames.push(p.name);
-        }
+    const match = findBestPropertyMatch(line);
+    if(match){
+      if(!orderedIds.includes(match.id)) orderedIds.push(match.id);
+      if(!state.pickerSelection.has(match.id)){
+        state.pickerSelection.add(match.id);
+        matchedCount++;
+        matchedNames.push(match.name);
       }
-    });
+    }
   });
+  state.pasteMatchOrder = orderedIds;
   return { matchedCount, matchedNames };
 }
 
@@ -1508,27 +1637,55 @@ async function moveJobCard(id, direction){
   render();
 }
 
-async function createTodayList(){
+function buildOrderedRecord(){
   const tasks = {};
   const selected = Array.from(state.pickerSelection);
-  // 당일 체크인 표시된 곳을 최우선으로, 나머지는 고른 순서 그대로 (체크인 시간은 참고만)
-  const orderedIds = selected.sort((a,b)=>{
+  const sortByPriorityAndTime = (a,b)=>{
     const pa = state.pickerPriority.has(a) ? 0 : 1;
     const pb = state.pickerPriority.has(b) ? 0 : 1;
     if(pa !== pb) return pa - pb;
     return parseInTimeForSort(propById(a).in) - parseInTimeForSort(propById(b).in);
-  });
+  };
+  let orderedIds;
+  if(state.pasteMatchOrder && state.pasteMatchOrder.length > 0){
+    // 붙여넣은 메시지에 적힌 순서를 최우선으로 쓰고, 그 외 추가로 체크한 곳은 뒤에 붙임
+    const pasteIds = state.pasteMatchOrder.filter(id => state.pickerSelection.has(id));
+    const rest = selected.filter(id => !pasteIds.includes(id)).sort(sortByPriorityAndTime);
+    orderedIds = [...pasteIds, ...rest];
+  } else {
+    orderedIds = selected.sort(sortByPriorityAndTime);
+  }
   orderedIds.forEach(id=>{
     const p = propById(id);
     tasks[id] = tasksForProperty(p).map(text=>({text, done:false}));
   });
-  state.todayRecord = { propertyIds: orderedIds, tasks, priorityIds: Array.from(state.pickerPriority) };
+  return { propertyIds: orderedIds, tasks, priorityIds: Array.from(state.pickerPriority) };
+}
+
+async function createTodayList(){
+  state.todayRecord = buildOrderedRecord();
   state.openJobIds = new Set();
   state.calPasteText = '';
   state.calPasteResultMsg = '';
   state.pickerPriority = new Set();
+  state.pasteMatchOrder = [];
   await saveTodayRecord();
   render();
+}
+
+async function createTomorrowList(){
+  if(state.pickerSelection.size === 0) return;
+  const record = buildOrderedRecord();
+  try{
+    await window.storage.set('today:' + tomorrowStr(), JSON.stringify(record), false);
+  }catch(e){}
+  state.calPasteText = '';
+  state.calPasteResultMsg = '';
+  state.pickerPriority = new Set();
+  state.pasteMatchOrder = [];
+  state.pickerSelection = new Set();
+  render();
+  alert(`내일(${tomorrowLabel()}) 리스트를 미리 만들어놨어. 내일 앱을 열면 바로 보일 거야.`);
 }
 
 document.querySelectorAll('.tab').forEach(t=>{
