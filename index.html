@@ -689,11 +689,11 @@ function triggerCompletionReport(propertyId){
   if(!p) return;
   const d = new Date();
   const dateLabel = `${d.getMonth()+1}/${d.getDate()}`;
-  const message = `[완료 보고] ${dateLabel} ${p.name} 청소 확인 및 세탁물 반납 완료했습니다.`;
+  const message = `${dateLabel} ${p.name} 확인했습니다.`;
   const doShare = async ()=>{
     try{
       if(navigator.share){
-        await navigator.share({ title: '완료 보고', text: message });
+        await navigator.share({ title: '컨디션체크 완료', text: message });
       } else {
         alert('이 브라우저에서는 자동 공유가 안 돼. 아래 문구를 복사해서 직접 보내줘.\n\n' + message);
       }
@@ -979,6 +979,8 @@ function renderScheduleCards(){
         <button class="task-remove" data-remove-task="${id}:${idx}" title="이 업체에서 항목 빼기">✕</button>
       </div>
     `).join('');
+    const conditionTask = tasks.find(t=>t.text.includes('컨디션') || t.text.includes('사진'));
+    const conditionDone = conditionTask ? conditionTask.done : false;
     const missingTasks = ['세탁물 전달','컨디션 체크'].filter(txt => !tasks.some(t=>t.text===txt));
     const missingRow = missingTasks.length ? `
       <div class="task-missing-row">
@@ -1028,6 +1030,12 @@ function renderScheduleCards(){
           <div class="section-divider"></div>
           <div class="task-list">${taskRows}</div>
           ${missingRow}
+          ${conditionDone ? `
+          <div class="job-row" style="margin-top:10px;">
+            <button class="pill-btn" data-report="${id}" style="background:var(--teal-soft);color:var(--teal);">📨 완료 보고하기</button>
+          </div>
+          ${lastReportFor(id) ? `<div class="task-meta">최근 보고: ${formatSendTime(lastReportFor(id).ts)}</div>` : ''}
+          ` : ''}
         </div>
       </div>
     `;
