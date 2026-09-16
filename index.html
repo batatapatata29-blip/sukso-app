@@ -51,13 +51,20 @@
 
   /* summary bar */
   .summary{
-    display:flex;align-items:center;justify-content:space-between;
     background:var(--surface);border:1px solid var(--paper-line);
     border-radius:var(--radius);padding:12px 14px;margin-bottom:12px;
   }
   .summary .date{font-size:12px;color:var(--ink-soft);}
-  .summary .count{font-family:var(--serif);font-size:20px;font-weight:700;}
+  .summary .count{font-family:var(--serif);font-size:20px;font-weight:700;margin-top:2px;}
   .summary .count span{color:var(--teal);}
+  .count-row{display:flex;gap:16px;margin-top:6px;}
+  .count-item{font-family:var(--serif);font-size:16px;font-weight:700;color:var(--ink);}
+  .count-item span{color:var(--teal);}
+  .summary-actions{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap;}
+  .summary-actions button{
+    font-size:12px;color:var(--ink-soft);background:var(--paper);border:1px solid var(--paper-line);
+    border-radius:20px;padding:6px 10px;cursor:pointer;font-family:var(--sans);
+  }
   .relist-btn{
     font-size:12px;color:var(--ink-soft);background:none;border:1px solid var(--paper-line);
     border-radius:20px;padding:6px 12px;cursor:pointer;font-family:var(--sans);
@@ -251,21 +258,22 @@
   .cal-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));grid-auto-rows:44px;gap:4px;margin-bottom:16px;width:100%;}
   .cal-day{
     min-width:0;height:44px;display:flex;flex-direction:column;align-items:center;justify-content:center;
-    border-radius:8px;font-size:13px;color:var(--ink-soft);cursor:default;position:relative;background:var(--surface);border:1px solid transparent;
+    border-radius:8px;font-size:13px;color:var(--ink-soft);cursor:pointer;position:relative;background:var(--surface);border:1px solid transparent;
   }
-  .cal-day.empty{background:none;border:none;}
-  .cal-day.has-record{cursor:pointer;color:var(--ink);border-color:var(--paper-line);}
+  .cal-day.empty{background:none;border:none;cursor:default;}
+  .cal-day.has-record{color:var(--ink);border-color:var(--paper-line);}
   .cal-day.has-record .dot{width:5px;height:5px;border-radius:50%;background:var(--teal);margin-top:2px;}
   .cal-day.selected{background:var(--ink);color:#fff;}
   .cal-day.selected .dot{background:#fff;}
   .cal-day.is-today{font-weight:700;}
-  .history-detail{background:var(--surface);border:1px solid var(--paper-line);border-radius:var(--radius);padding:14px;}
-  .history-detail h3{font-family:var(--serif);font-size:15px;margin:0 0 10px 0;}
-  .history-item{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--paper-line);font-size:13px;}
-  .history-item:last-child{border-bottom:none;}
-  .history-item .hi-status{font-size:11px;font-family:var(--mono);padding:2px 7px;border-radius:5px;}
-  .hi-status.done{background:var(--teal-soft);color:var(--teal);}
-  .hi-status.pending{background:var(--mustard-soft);color:var(--mustard);}
+  .schedule-cal-bar{
+    display:flex;align-items:center;justify-content:space-between;background:var(--surface);
+    border:1px solid var(--paper-line);border-radius:var(--radius);padding:10px 14px;margin-bottom:12px;font-size:14px;
+  }
+  .schedule-cal-bar button{
+    font-size:12px;color:var(--ink-soft);background:var(--paper);border:1px solid var(--paper-line);
+    border-radius:20px;padding:6px 10px;cursor:pointer;font-family:var(--sans);
+  }
 
   /* modal */
   .overlay{
@@ -297,10 +305,9 @@
 <div class="topbar">
   <h1>숙소 관리 수첩</h1>
   <div class="tabs">
-    <button class="tab" data-tab="today">오늘</button>
+    <button class="tab" data-tab="today">일정</button>
     <button class="tab" data-tab="all">전체 업체</button>
     <button class="tab" data-tab="map">지도</button>
-    <button class="tab" data-tab="history">기록</button>
   </div>
 </div>
 
@@ -337,7 +344,7 @@ const todayStr = () => {
   const d = new Date();
   return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
 };
-const todayKey = () => 'today:' + todayStr();
+const todayKey = () => 'today:' + state.selectedDate;
 const tomorrowStr = () => {
   const d = new Date();
   d.setDate(d.getDate() + 1);
@@ -352,8 +359,9 @@ function tomorrowLabel(){
 
 let state = {
   tab: 'today',
+  selectedDate: null, // 초기화 시 todayStr()로 세팅됨
   properties: [],
-  todayRecord: null, // {propertyIds:[], tasks:{id:[{text,done}]}}
+  todayRecord: null, // {propertyIds:[], tasks:{id:[{text,done}]}} - state.selectedDate 기준
   pickerSelection: new Set(),
   pickerPriority: new Set(),
   openJobIds: new Set(),
@@ -361,7 +369,8 @@ let state = {
   calPasteText: '',
   calPasteResultMsg: '',
   pasteMatchOrder: [],
-  tomorrowPickerOpen: false,
+  scheduleCalendarOpen: false,
+  editTodayOpen: false,
   search: '',
   openIds: new Set(),
   editing: null, // property object being edited, or {} for new
@@ -374,9 +383,7 @@ let state = {
   reportLog: [],
   workLog: [],
   historyDates: null, // Set of 'YYYY-MM-DD' strings that have records, loaded lazily
-  historyMonth: (()=>{ const d=new Date(); return { year: d.getFullYear(), month: d.getMonth() }; })(),
-  historySelectedDate: null,
-  historySelectedRecord: undefined // undefined = not loaded, null = loaded but empty
+  historyMonth: (()=>{ const d=new Date(); return { year: d.getFullYear(), month: d.getMonth() }; })()
 };
 
 const DEFAULT_PROPERTIES = [
@@ -810,9 +817,7 @@ function tasksForProperty(p){
 }
 
 function renderDateLabel(){
-  const d = new Date();
-  const days = ['일','월','화','수','목','금','토'];
-  return `${d.getMonth()+1}월 ${d.getDate()}일 (${days[d.getDay()]})`;
+  return formatDateLabel(state.selectedDate);
 }
 
 function render(){
@@ -824,6 +829,7 @@ function render(){
     fab.style.display='none';
     view.innerHTML = renderToday();
     attachHandlers();
+    setupHistoryIfNeeded();
   } else if(state.tab === 'all'){
     fab.style.display='flex';
     fab.style.alignItems='center';
@@ -835,11 +841,6 @@ function render(){
     view.innerHTML = renderMapTab();
     attachHandlers();
     setupMapIfNeeded();
-  } else if(state.tab === 'history'){
-    fab.style.display='none';
-    view.innerHTML = renderHistoryTab();
-    attachHandlers();
-    setupHistoryIfNeeded();
   }
 }
 
@@ -888,7 +889,7 @@ async function stepClockTime(field, delta){
 }
 
 function renderPickerBody(mode){
-  const isTomorrow = mode === 'tomorrow';
+  const isEdit = mode === 'edit';
   const rows = state.properties.map(p=>`
     <label class="picker-row ${state.pickerSelection.has(p.id)?'checked':''}" data-pick="${p.id}">
       <input type="checkbox" ${state.pickerSelection.has(p.id)?'checked':''} data-pick-cb="${p.id}">
@@ -899,10 +900,12 @@ function renderPickerBody(mode){
       <button class="priority-toggle ${state.pickerPriority.has(p.id)?'active':''}" data-priority="${p.id}">🔴 당일체크인</button>
     </label>
   `).join('');
-  const dateLabel = isTomorrow ? tomorrowLabel() : renderDateLabel();
-  const dayWord = isTomorrow ? '내일' : '오늘';
+  const dateLabel = renderDateLabel();
+  const isTodaySelected = state.selectedDate === todayStr();
   return `
-    ${!isTomorrow ? renderClockCard() : `<div class="picker-intro" style="margin-bottom:0;">📅 <b>내일(${dateLabel}) 리스트 준비 중</b> — 오늘 리스트랑은 별개로 저장돼.</div>`}
+    ${renderScheduleCalendar()}
+    ${(!isEdit && isTodaySelected) ? renderClockCard() : ''}
+    <div class="picker-intro" style="margin-bottom:0;">${isEdit ? `➕ <b>${dateLabel} 업체 추가/제외</b> — 이미 체크한 세탁물·컨디션 진행 상황은 그대로 남아.` : `📋 <b>${dateLabel}</b> 일정을 만들어줘`}</div>
     <div class="paste-box">
       <label>일정·순서 메시지 붙여넣기 (선택)</label>
       <textarea id="calPasteBox" placeholder="캘린더 일정이나 &quot;동교로25길 301호-망원2룸-...&quot;처럼 순서대로 적힌 메시지를 붙여넣어봐">${esc(state.calPasteText)}</textarea>
@@ -910,27 +913,37 @@ function renderPickerBody(mode){
     </div>
     <div class="picker-list">${rows}</div>
     <div id="calPasteResult" style="font-size:12px;color:var(--ink-soft);margin:-6px 0 12px 0;">${esc(state.calPasteResultMsg)}</div>
-    ${isTomorrow ? `
-      <button class="confirm-btn" id="confirmTomorrowPick" ${state.pickerSelection.size===0?'disabled':''}>내일의 리스트 만들기 (${state.pickerSelection.size})</button>
-      <button class="export-btn" id="cancelTomorrowPick" style="margin-top:8px;background:var(--surface);color:var(--ink);border:1px solid var(--paper-line);">취소하고 돌아가기</button>
+    ${isEdit ? `
+      <button class="confirm-btn" id="confirmEditToday" ${state.pickerSelection.size===0?'disabled':''}>이 날짜에 반영하기 (${state.pickerSelection.size})</button>
+      <button class="export-btn" id="cancelEditToday" style="margin-top:8px;background:var(--surface);color:var(--ink);border:1px solid var(--paper-line);">취소하고 돌아가기</button>
     ` : `
-      <button class="confirm-btn" id="confirmPick" ${state.pickerSelection.size===0?'disabled':''}>오늘의 리스트 만들기 (${state.pickerSelection.size})</button>
-      <div style="text-align:center;margin-top:10px;"><button class="relist-btn" id="openTomorrowPicker">📅 내일 리스트 미리 준비하기</button></div>
+      <button class="confirm-btn" id="confirmPick" ${state.pickerSelection.size===0?'disabled':''}>일정 만들기 (${state.pickerSelection.size})</button>
     `}
   `;
 }
 
 function renderToday(){
-  if(state.tomorrowPickerOpen){
-    return renderPickerBody('tomorrow');
+  if(state.editTodayOpen){
+    return renderPickerBody('edit');
   }
   if(!state.todayRecord){
-    return renderPickerBody('today');
+    return renderPickerBody('create');
   }
+  return renderScheduleCalendar() + renderScheduleCards();
+}
 
+function renderScheduleCards(){
   const ids = state.todayRecord.propertyIds;
   const taskMap = state.todayRecord.tasks;
   const doneCount = ids.filter(id => taskMap[id].every(t=>t.done)).length;
+  const laundryDoneCount = ids.filter(id=>{
+    const t = (taskMap[id]||[]).find(t=>t.text.includes('세탁'));
+    return t ? t.done : false;
+  }).length;
+  const conditionDoneCount = ids.filter(id=>{
+    const t = (taskMap[id]||[]).find(t=>t.text.includes('컨디션') || t.text.includes('사진'));
+    return t ? t.done : false;
+  }).length;
   const laundryAllDone = ids.length > 0 && ids.every(id=>{
     const tasks = taskMap[id] || [];
     const laundryTask = tasks.find(t=>t.text.includes('세탁'));
@@ -997,15 +1010,16 @@ function renderToday(){
   }).join('');
 
   return `
-    ${renderClockCard()}
+    ${state.selectedDate === todayStr() ? renderClockCard() : ''}
     <div class="summary">
-      <div>
-        <div class="date">${renderDateLabel()}</div>
-        <div class="count"><span>${doneCount}</span> / ${ids.length} 완료</div>
+      <div class="date">${renderDateLabel()}</div>
+      <div class="count-row">
+        <div class="count-item">🧺 세탁물 <span>${laundryDoneCount}</span>/${ids.length}</div>
+        <div class="count-item">✅ 컨디션 <span>${conditionDoneCount}</span>/${ids.length}</div>
       </div>
-      <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end;">
-        <button class="relist-btn" id="relist">오늘 리스트 다시 선택</button>
-        <button class="relist-btn" id="openTomorrowPicker">📅 내일 리스트 준비</button>
+      <div class="summary-actions">
+        <button id="openEditToday">➕ 숙소 추가제외</button>
+        <button id="relist">🔄 초기화</button>
       </div>
     </div>
     ${laundryAllDone ? `<button class="export-btn" id="laundryReportBtn" style="margin-top:0;margin-bottom:14px;background:var(--teal);">🧺 세탁물 전달 완료 보고하기</button>` : ''}
@@ -1063,6 +1077,7 @@ function renderAll(){
         <div style="margin-top:8px;display:flex;flex-direction:column;gap:8px;">
           <button class="pill-btn" id="bulkParkingBtn">🚗 여러 업체에 주차등록 정보 한번에 적용</button>
           <button class="pill-btn" id="cleanupAddressBtn">🧹 주소 띄어쓰기 한번에 정리</button>
+          <button class="pill-btn" id="exportWorkLogBtn">📤 출퇴근 기록 CSV로 내보내기</button>
         </div>
       ` : ''}
     </div>
@@ -1103,63 +1118,36 @@ function renderMapTab(){
 function pad2(n){ return String(n).padStart(2,'0'); }
 function dateKeyOf(year, month, day){ return `${year}-${pad2(month+1)}-${pad2(day)}`; }
 
-function renderHistoryTab(){
+function renderScheduleCalendar(){
+  const dateLabel = formatDateLabel(state.selectedDate);
+  const isTodaySelected = state.selectedDate === todayStr();
+
+  if(!state.scheduleCalendarOpen){
+    return `
+      <div class="schedule-cal-bar">
+        <div>${isTodaySelected ? '📅 오늘 · ' : '📅 '}<b>${dateLabel}</b></div>
+        <button id="toggleScheduleCal">다른 날짜 ▾</button>
+      </div>
+    `;
+  }
+
   const { year, month } = state.historyMonth;
   const firstWeekday = new Date(year, month, 1).getDay();
   const daysInMonth = new Date(year, month+1, 0).getDate();
   const todayStrVal = todayStr();
-
-  const monthPrefix = `${year}-${pad2(month+1)}`;
-  const monthEntries = state.workLog.filter(e=>e.date.startsWith(monthPrefix));
-  const workDays = monthEntries.filter(e=>e.clockIn).length;
-  const totalMinutes = monthEntries.reduce((sum,e)=> sum + ((e.clockIn && e.clockOut) ? durationMinutes(e.clockIn, e.clockOut) : 0), 0);
 
   let cells = '';
   for(let i=0;i<firstWeekday;i++) cells += `<div class="cal-day empty"></div>`;
   for(let d=1; d<=daysInMonth; d++){
     const key = dateKeyOf(year, month, d);
     const hasRecord = state.historyDates && state.historyDates.has(key);
-    const isToday = key === todayStrVal;
-    const isSelected = key === state.historySelectedDate;
+    const isTodayCell = key === todayStrVal;
+    const isSelected = key === state.selectedDate;
     cells += `
-      <div class="cal-day ${hasRecord?'has-record':''} ${isToday?'is-today':''} ${isSelected?'selected':''}" ${hasRecord?`data-day="${key}"`:''}>
+      <div class="cal-day ${hasRecord?'has-record':''} ${isTodayCell?'is-today':''} ${isSelected?'selected':''}" data-select-date="${key}">
         ${d}${hasRecord?'<div class="dot"></div>':''}
       </div>
     `;
-  }
-
-  let detail = '';
-  if(state.historySelectedDate){
-    const rec = state.historySelectedRecord;
-    if(rec === undefined){
-      detail = `<div class="history-detail">불러오는 중...</div>`;
-    } else if(!rec){
-      detail = `<div class="history-detail">이 날짜엔 기록이 없어.</div>`;
-    } else {
-      const rows = rec.propertyIds.map(id=>{
-        const p = propById(id);
-        const tasks = rec.tasks[id] || [];
-        const done = tasks.length>0 && tasks.every(t=>t.done);
-        const doneCount = tasks.filter(t=>t.done).length;
-        return `
-          <div class="history-item">
-            <span>${esc(p ? p.name : '(삭제된 업체)')}</span>
-            <span class="hi-status ${done?'done':'pending'}">${doneCount}/${tasks.length}</span>
-          </div>
-        `;
-      }).join('');
-      const workEntry = getWorkEntry(state.historySelectedDate);
-      const workLine = workEntry && (workEntry.clockIn || workEntry.clockOut)
-        ? `<div style="font-size:12.5px;color:var(--ink-soft);margin-bottom:10px;">🕒 출근 ${workEntry.clockIn||'-'} · 🏁 퇴근 ${workEntry.clockOut||'-'}${(workEntry.clockIn&&workEntry.clockOut)?' · '+formatDuration(workEntry.clockIn, workEntry.clockOut):''}</div>`
-        : '';
-      detail = `
-        <div class="history-detail">
-          <h3>${formatDateLabel(state.historySelectedDate)}</h3>
-          ${workLine}
-          ${rows || '<div style="font-size:13px;color:var(--ink-soft);">방문 업체 없음</div>'}
-        </div>
-      `;
-    }
   }
 
   return `
@@ -1168,16 +1156,9 @@ function renderHistoryTab(){
       <div class="month-label">${year}년 ${month+1}월</div>
       <button data-month-nav="1">다음달 ›</button>
     </div>
-    <div class="summary" style="margin-bottom:14px;">
-      <div>
-        <div class="date">${month+1}월 요약</div>
-        <div class="count">근무 <span>${workDays}</span>일 · ${formatMinutes(totalMinutes)}</div>
-      </div>
-    </div>
     <div class="cal-weekdays"><div>일</div><div>월</div><div>화</div><div>수</div><div>목</div><div>금</div><div>토</div></div>
     <div class="cal-grid">${cells}</div>
-    ${detail || `<div style="text-align:center;font-size:12.5px;color:var(--ink-soft);">점이 있는 날짜를 눌러보면 그날 기록을 볼 수 있어.</div>`}
-    <button class="export-btn" id="exportWorkLogBtn">📤 출퇴근 기록 CSV로 내보내기</button>
+    <button class="relist-btn" id="toggleScheduleCal" style="width:100%;margin-bottom:12px;">달력 접기 ▴</button>
   `;
 }
 
@@ -1200,16 +1181,16 @@ async function setupHistoryIfNeeded(){
   render();
 }
 
-async function selectHistoryDate(dateKey){
-  state.historySelectedDate = dateKey;
-  state.historySelectedRecord = undefined;
-  render();
-  try{
-    const res = await window.storage.get('today:' + dateKey, false);
-    state.historySelectedRecord = (res && res.value) ? JSON.parse(res.value) : null;
-  }catch(e){
-    state.historySelectedRecord = null;
-  }
+async function selectScheduleDate(dateKey){
+  state.selectedDate = dateKey;
+  state.scheduleCalendarOpen = false;
+  state.editTodayOpen = false;
+  state.pickerSelection = new Set();
+  state.pickerPriority = new Set();
+  state.pasteMatchOrder = [];
+  state.calPasteText = '';
+  state.calPasteResultMsg = '';
+  await loadTodayRecord();
   render();
 }
 
@@ -1480,14 +1461,19 @@ function attachHandlers(){
   });
   const confirmBtn = document.getElementById('confirmPick');
   if(confirmBtn) confirmBtn.onclick = createTodayList;
-  const confirmTomorrowBtn = document.getElementById('confirmTomorrowPick');
-  if(confirmTomorrowBtn) confirmTomorrowBtn.onclick = createTomorrowList;
-  const cancelTomorrowBtn = document.getElementById('cancelTomorrowPick');
-  if(cancelTomorrowBtn) cancelTomorrowBtn.onclick = closeTomorrowPicker;
-  const openTomorrowBtn = document.getElementById('openTomorrowPicker');
-  if(openTomorrowBtn) openTomorrowBtn.onclick = openTomorrowPicker;
   const laundryReportBtn = document.getElementById('laundryReportBtn');
   if(laundryReportBtn) laundryReportBtn.onclick = triggerLaundryReport;
+  const openEditTodayBtn = document.getElementById('openEditToday');
+  if(openEditTodayBtn) openEditTodayBtn.onclick = openEditToday;
+  const toggleScheduleCalBtn = document.getElementById('toggleScheduleCal');
+  if(toggleScheduleCalBtn) toggleScheduleCalBtn.onclick = ()=>{ state.scheduleCalendarOpen = !state.scheduleCalendarOpen; render(); };
+  document.querySelectorAll('[data-select-date]').forEach(el=>{
+    el.onclick = ()=> selectScheduleDate(el.dataset.selectDate);
+  });
+  const confirmEditTodayBtn = document.getElementById('confirmEditToday');
+  if(confirmEditTodayBtn) confirmEditTodayBtn.onclick = applyEditToday;
+  const cancelEditTodayBtn = document.getElementById('cancelEditToday');
+  if(cancelEditTodayBtn) cancelEditTodayBtn.onclick = closeEditToday;
 
   const calPasteMatch = document.getElementById('calPasteMatch');
   if(calPasteMatch){
@@ -1504,6 +1490,7 @@ function attachHandlers(){
 
   const relist = document.getElementById('relist');
   if(relist) relist.onclick = ()=>{
+    if(!confirm('전체 초기화하면 지금까지 체크한 세탁물·컨디션 진행 상황이 다 지워져. 계속할까?')) return;
     state.pickerSelection = new Set(state.todayRecord.propertyIds);
     state.pickerPriority = new Set(state.todayRecord.priorityIds || []);
     state.todayRecord = null;
@@ -1656,9 +1643,6 @@ function attachHandlers(){
       render();
     };
   });
-  document.querySelectorAll('[data-day]').forEach(el=>{
-    el.onclick = ()=> selectHistoryDate(el.dataset.day);
-  });
   const exportWorkLogBtn = document.getElementById('exportWorkLogBtn');
   if(exportWorkLogBtn) exportWorkLogBtn.onclick = exportWorkLogCSV;
 }
@@ -1776,8 +1760,17 @@ async function createTodayList(){
   render();
 }
 
-function openTomorrowPicker(){
-  state.tomorrowPickerOpen = true;
+function openEditToday(){
+  state.editTodayOpen = true;
+  state.pickerSelection = new Set(state.todayRecord.propertyIds);
+  state.pickerPriority = new Set(state.todayRecord.priorityIds || []);
+  state.pasteMatchOrder = [];
+  state.calPasteText = '';
+  state.calPasteResultMsg = '';
+  render();
+}
+function closeEditToday(){
+  state.editTodayOpen = false;
   state.pickerSelection = new Set();
   state.pickerPriority = new Set();
   state.pasteMatchOrder = [];
@@ -1785,25 +1778,31 @@ function openTomorrowPicker(){
   state.calPasteResultMsg = '';
   render();
 }
-function closeTomorrowPicker(){
-  state.tomorrowPickerOpen = false;
-  state.pickerSelection = new Set();
-  state.pickerPriority = new Set();
-  state.pasteMatchOrder = [];
-  state.calPasteText = '';
-  state.calPasteResultMsg = '';
+async function applyEditToday(){
+  const existingIds = state.todayRecord.propertyIds;
+  const existingTasks = state.todayRecord.tasks;
+  const newSelection = Array.from(state.pickerSelection);
+  // 기존에 있던 곳은 순서·진행상황 그대로 유지, 새로 체크한 곳만 뒤에 추가
+  const kept = existingIds.filter(id => state.pickerSelection.has(id));
+  const addedRaw = newSelection.filter(id => !existingIds.includes(id));
+  let added;
+  if(state.pasteMatchOrder && state.pasteMatchOrder.length > 0){
+    const pasteAdded = state.pasteMatchOrder.filter(id => addedRaw.includes(id));
+    const restAdded = addedRaw.filter(id => !pasteAdded.includes(id))
+      .sort((a,b)=> parseInTimeForSort(propById(a).in) - parseInTimeForSort(propById(b).in));
+    added = [...pasteAdded, ...restAdded];
+  } else {
+    added = addedRaw.sort((a,b)=> parseInTimeForSort(propById(a).in) - parseInTimeForSort(propById(b).in));
+  }
+  const finalIds = [...kept, ...added];
+  const tasks = {};
+  finalIds.forEach(id=>{
+    tasks[id] = existingTasks[id] || tasksForProperty(propById(id)).map(text=>({text, done:false}));
+  });
+  state.todayRecord = { propertyIds: finalIds, tasks, priorityIds: Array.from(state.pickerPriority) };
+  closeEditToday();
+  await saveTodayRecord();
   render();
-}
-
-async function createTomorrowList(){
-  if(state.pickerSelection.size === 0) return;
-  const record = buildOrderedRecord();
-  try{
-    await window.storage.set('today:' + tomorrowStr(), JSON.stringify(record), false);
-  }catch(e){}
-  const label = tomorrowLabel();
-  closeTomorrowPicker();
-  alert(`내일(${label}) 리스트를 미리 만들어놨어. 내일 앱을 열면 바로 보일 거야.`);
 }
 
 document.querySelectorAll('.tab').forEach(t=>{
@@ -1812,6 +1811,7 @@ document.querySelectorAll('.tab').forEach(t=>{
 document.getElementById('fab').onclick = ()=> openEditSheet(null);
 
 (async function init(){
+  state.selectedDate = todayStr();
   await loadProperties();
   await loadTodayRecord();
   // 오늘 리스트는 기본적으로 접힌 상태로 시작 (state.openJobIds는 빈 Set 그대로 둠)
