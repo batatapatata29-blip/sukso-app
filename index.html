@@ -306,8 +306,8 @@
   <h1>숙소 관리 수첩</h1>
   <div class="tabs">
     <button class="tab" data-tab="today">일정</button>
-    <button class="tab" data-tab="all">전체 업체</button>
     <button class="tab" data-tab="map">지도</button>
+    <button class="tab" data-tab="all">숙소</button>
   </div>
 </div>
 
@@ -1100,11 +1100,11 @@ function renderMapTab(){
   return `
     <div class="map-scope">
       <button class="scope-btn ${scope==='today'?'active':''}" data-scope="today">오늘 리스트만</button>
-      <button class="scope-btn ${scope==='all'?'active':''}" data-scope="all">전체 업체</button>
+      <button class="scope-btn ${scope==='all'?'active':''}" data-scope="all">전체 숙소</button>
     </div>
     <div id="kakaoMapDiv"></div>
     <div class="map-hint">
-      핀을 누르면 업체 이름이 떠. 주소가 바뀌었거나 위치가 이상하면 전체 업체 탭에서 주소를 다시 확인해줘.
+      핀을 누르면 업체 이름이 떠. 주소가 바뀌었거나 위치가 이상하면 숙소 탭에서 주소를 다시 확인해줘.
       ${state.companyLocation && state.companyLocation.carPlate ? `<div style="margin-top:6px;">🚗 회사차: <b style="color:var(--ink);">${esc(state.companyLocation.carPlate)}</b></div>` : ''}
       <div class="link-row">
         <button id="setCompanyLocation">🏢 회사 위치 ${state.companyLocation ? '수정' : '등록'}</button>
