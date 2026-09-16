@@ -57,13 +57,13 @@
   .summary .date{font-size:12px;color:var(--ink-soft);}
   .summary .count{font-family:var(--serif);font-size:20px;font-weight:700;margin-top:2px;}
   .summary .count span{color:var(--teal);}
-  .count-row{display:flex;gap:16px;margin-top:6px;}
+  .count-row{display:flex;align-items:center;gap:16px;margin-top:6px;}
   .count-item{font-family:var(--serif);font-size:16px;font-weight:700;color:var(--ink);}
   .count-item span{color:var(--teal);}
-  .summary-actions{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap;}
+  .summary-actions{display:flex;gap:6px;margin-left:auto;}
   .summary-actions button{
-    font-size:12px;color:var(--ink-soft);background:var(--paper);border:1px solid var(--paper-line);
-    border-radius:20px;padding:6px 10px;cursor:pointer;font-family:var(--sans);
+    width:30px;height:30px;font-size:14px;color:var(--ink-soft);background:var(--paper);border:1px solid var(--paper-line);
+    border-radius:50%;cursor:pointer;font-family:var(--sans);display:flex;align-items:center;justify-content:center;padding:0;
   }
   .relist-btn{
     font-size:12px;color:var(--ink-soft);background:none;border:1px solid var(--paper-line);
@@ -138,6 +138,10 @@
     border-bottom:1px solid var(--paper-line);
   }
   .section-divider{border-top:1px solid var(--paper-line);margin:12px 0;}
+  .excluded-section{margin-top:6px;padding:12px 14px;background:var(--paper);border:1px dashed var(--paper-line);border-radius:var(--radius);}
+  .excluded-title{font-size:12px;color:var(--ink-soft);font-weight:600;margin-bottom:8px;}
+  .excluded-item{display:flex;justify-content:space-between;align-items:center;font-size:13px;color:var(--ink-soft);padding:4px 0;}
+  .excluded-meta{font-size:11px;font-family:var(--mono);}
   .job-name{font-family:var(--serif);font-size:16px;font-weight:700;}
   .job-owner{font-size:12px;color:var(--ink-soft);margin-top:2px;}
   .badge-row{display:flex;gap:6px;flex-shrink:0;}
@@ -185,10 +189,11 @@
   .parking-link{font-size:13px;color:var(--teal);text-decoration:none;}
   .task-list{margin-top:12px;display:flex;flex-direction:row;gap:6px;}
   .task-item{
-    display:flex;flex-direction:row;align-items:center;justify-content:flex-start;gap:6px;cursor:pointer;
-    border:none;border-radius:8px;padding:9px 8px;
+    display:flex;flex-direction:row;align-items:center;gap:2px;
+    border:none;border-radius:8px;padding:4px 4px 4px 8px;
     background:var(--paper);flex:1;min-width:0;
   }
+  .task-item-main{display:flex;flex-direction:row;align-items:center;gap:6px;cursor:pointer;flex:1;min-width:0;padding:5px 0;}
   .task-item .box{
     width:16px;height:16px;border-radius:5px;border:1.5px solid var(--ink-soft);
     flex-shrink:0;display:flex;align-items:center;justify-content:center;
@@ -198,6 +203,15 @@
   .task-item.done .box{background:var(--teal);border-color:var(--teal);}
   .task-item .ttext{font-size:12.5px;line-height:1.3;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
   .task-item.done .ttext{color:var(--ink-soft);text-decoration:line-through;}
+  .task-remove{
+    flex-shrink:0;width:20px;height:20px;border:none;background:none;color:var(--ink-soft);
+    font-size:11px;cursor:pointer;border-radius:50%;
+  }
+  .task-missing-row{display:flex;gap:6px;margin-top:6px;flex-wrap:wrap;}
+  .task-add-back{
+    font-size:11px;color:var(--ink-soft);background:var(--surface);border:1px dashed var(--paper-line);
+    border-radius:14px;padding:5px 10px;cursor:pointer;font-family:var(--sans);
+  }
   .task-meta{font-size:11px;color:var(--ink-soft);margin-top:8px;}
 
   /* all list */
@@ -957,11 +971,20 @@ function renderScheduleCards(){
     const isDone = tasks.every(t=>t.done);
     const isPriority = (state.todayRecord.priorityIds || []).includes(id);
     const taskRows = tasks.map((t,idx)=>`
-      <div class="task-item ${t.done?'done':''}" data-task="${id}:${idx}">
-        <div class="box">${t.done?'✓':''}</div>
-        <div class="ttext">${esc(t.text)}</div>
+      <div class="task-item ${t.done?'done':''}">
+        <div class="task-item-main" data-task="${id}:${idx}">
+          <div class="box">${t.done?'✓':''}</div>
+          <div class="ttext">${esc(t.text)}</div>
+        </div>
+        <button class="task-remove" data-remove-task="${id}:${idx}" title="이 업체에서 항목 빼기">✕</button>
       </div>
     `).join('');
+    const missingTasks = ['세탁물 전달','컨디션 체크'].filter(txt => !tasks.some(t=>t.text===txt));
+    const missingRow = missingTasks.length ? `
+      <div class="task-missing-row">
+        ${missingTasks.map(txt=>`<button class="task-add-back" data-add-task="${id}:${txt}">+ ${esc(txt)}</button>`).join('')}
+      </div>
+    ` : '';
     return `
       <div class="job-card ${isDone?'done':''} ${isPriority && !isDone ?'priority':''} ${state.openJobIds.has(id)?'open':''}">
         <div class="job-head" data-toggle-job="${id}">
@@ -1004,6 +1027,7 @@ function renderScheduleCards(){
           </div>` : ''}
           <div class="section-divider"></div>
           <div class="task-list">${taskRows}</div>
+          ${missingRow}
         </div>
       </div>
     `;
@@ -1016,14 +1040,24 @@ function renderScheduleCards(){
       <div class="count-row">
         <div class="count-item">🧺 세탁물 <span>${laundryDoneCount}</span>/${ids.length}</div>
         <div class="count-item">✅ 컨디션 <span>${conditionDoneCount}</span>/${ids.length}</div>
-      </div>
-      <div class="summary-actions">
-        <button id="openEditToday">➕ 숙소 추가제외</button>
-        <button id="relist">🔄 초기화</button>
+        <div class="summary-actions">
+          <button id="openEditToday" title="숙소 추가제외">➕</button>
+          <button id="relist" title="초기화">🔄</button>
+        </div>
       </div>
     </div>
     ${laundryAllDone ? `<button class="export-btn" id="laundryReportBtn" style="margin-top:0;margin-bottom:14px;background:var(--teal);">🧺 세탁물 전달 완료 보고하기</button>` : ''}
     ${cards}
+    ${(state.todayRecord.excludedIds && state.todayRecord.excludedIds.length > 0) ? `
+      <div class="excluded-section">
+        <div class="excluded-title">🚫 오늘 제외된 숙소 (${state.todayRecord.excludedIds.length})</div>
+        ${state.todayRecord.excludedIds.map(e=>{
+          const doneCount = (e.tasks||[]).filter(t=>t.done).length;
+          const totalCount = (e.tasks||[]).length;
+          return `<div class="excluded-item"><span>${esc(e.name)}</span><span class="excluded-meta">${doneCount}/${totalCount} 상태로 제외</span></div>`;
+        }).join('')}
+      </div>
+    ` : ''}
   `;
 }
 
@@ -1506,6 +1540,19 @@ function attachHandlers(){
       render();
     };
   });
+  document.querySelectorAll('[data-remove-task]').forEach(el=>{
+    el.onclick = (ev)=>{
+      ev.stopPropagation();
+      const [id, idx] = el.dataset.removeTask.split(':');
+      removeTask(id, Number(idx));
+    };
+  });
+  document.querySelectorAll('[data-add-task]').forEach(el=>{
+    el.onclick = ()=>{
+      const [id, text] = el.dataset.addTask.split(':');
+      addTaskBack(id, text);
+    };
+  });
 
   document.querySelectorAll('[data-pw-edit]').forEach(el=>{
     el.onchange = async ()=>{
@@ -1724,6 +1771,18 @@ async function moveJobCard(id, direction){
   render();
 }
 
+async function removeTask(id, idx){
+  const tasks = state.todayRecord.tasks[id];
+  tasks.splice(idx, 1);
+  await saveTodayRecord();
+  render();
+}
+async function addTaskBack(id, text){
+  state.todayRecord.tasks[id].push({ text, done: false });
+  await saveTodayRecord();
+  render();
+}
+
 function buildOrderedRecord(){
   const tasks = {};
   const selected = Array.from(state.pickerSelection);
@@ -1781,9 +1840,11 @@ function closeEditToday(){
 async function applyEditToday(){
   const existingIds = state.todayRecord.propertyIds;
   const existingTasks = state.todayRecord.tasks;
+  const existingExcluded = state.todayRecord.excludedIds || [];
   const newSelection = Array.from(state.pickerSelection);
   // 기존에 있던 곳은 순서·진행상황 그대로 유지, 새로 체크한 곳만 뒤에 추가
   const kept = existingIds.filter(id => state.pickerSelection.has(id));
+  const removed = existingIds.filter(id => !state.pickerSelection.has(id));
   const addedRaw = newSelection.filter(id => !existingIds.includes(id));
   let added;
   if(state.pasteMatchOrder && state.pasteMatchOrder.length > 0){
@@ -1799,7 +1860,13 @@ async function applyEditToday(){
   finalIds.forEach(id=>{
     tasks[id] = existingTasks[id] || tasksForProperty(propById(id)).map(text=>({text, done:false}));
   });
-  state.todayRecord = { propertyIds: finalIds, tasks, priorityIds: Array.from(state.pickerPriority) };
+  const newlyExcluded = removed.map(id=>{
+    const p = propById(id);
+    return { id, name: p ? p.name : '(삭제된 업체)', tasks: existingTasks[id] || [], excludedAt: new Date().toISOString() };
+  });
+  // 다시 추가된 곳은 "제외됨" 목록에서 빠짐
+  const excludedIds = [...existingExcluded.filter(e => !finalIds.includes(e.id)), ...newlyExcluded];
+  state.todayRecord = { propertyIds: finalIds, tasks, priorityIds: Array.from(state.pickerPriority), excludedIds };
   closeEditToday();
   await saveTodayRecord();
   render();
