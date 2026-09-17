@@ -950,14 +950,12 @@ function renderScheduleCards(){
   const ids = state.todayRecord.propertyIds;
   const taskMap = state.todayRecord.tasks;
   const doneCount = ids.filter(id => taskMap[id].every(t=>t.done)).length;
-  const laundryDoneCount = ids.filter(id=>{
-    const t = (taskMap[id]||[]).find(t=>t.text.includes('세탁'));
-    return t ? t.done : false;
-  }).length;
-  const conditionDoneCount = ids.filter(id=>{
-    const t = (taskMap[id]||[]).find(t=>t.text.includes('컨디션') || t.text.includes('사진'));
-    return t ? t.done : false;
-  }).length;
+  const laundryApplicableIds = ids.filter(id => (taskMap[id]||[]).some(t=>t.text.includes('세탁')));
+  const laundryDoneCount = laundryApplicableIds.filter(id => taskMap[id].find(t=>t.text.includes('세탁')).done).length;
+  const laundryTotal = laundryApplicableIds.length;
+  const conditionApplicableIds = ids.filter(id => (taskMap[id]||[]).some(t=>t.text.includes('컨디션') || t.text.includes('사진')));
+  const conditionDoneCount = conditionApplicableIds.filter(id => taskMap[id].find(t=>t.text.includes('컨디션') || t.text.includes('사진')).done).length;
+  const conditionTotal = conditionApplicableIds.length;
   const laundryAllDone = ids.length > 0 && ids.every(id=>{
     const tasks = taskMap[id] || [];
     const laundryTask = tasks.find(t=>t.text.includes('세탁'));
@@ -1046,8 +1044,8 @@ function renderScheduleCards(){
     <div class="summary">
       <div class="date">${renderDateLabel()}</div>
       <div class="count-row">
-        <div class="count-item">🧺 세탁물 <span>${laundryDoneCount}</span>/${ids.length}</div>
-        <div class="count-item">✅ 컨디션 <span>${conditionDoneCount}</span>/${ids.length}</div>
+        <div class="count-item">🧺 세탁물 <span>${laundryDoneCount}</span>/${laundryTotal}</div>
+        <div class="count-item">✅ 컨디션 <span>${conditionDoneCount}</span>/${conditionTotal}</div>
         <div class="summary-actions">
           <button id="openEditToday" title="숙소 추가제외">➕</button>
           <button id="relist" title="초기화">🔄</button>
