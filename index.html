@@ -390,6 +390,7 @@ let state = {
   editing: null, // property object being edited, or {} for new
   kakaoKey: null,
   companyLocation: null,
+  hourlyWage: 0,
   mapScope: 'today', // 'today' | 'all'
   mapReady: false,
   geocodeCache: {},
@@ -481,6 +482,16 @@ async function loadCompanyLocation(){
     const res = await window.storage.get('settings:companyLocation', false);
     if(res && res.value){ state.companyLocation = JSON.parse(res.value); }
   }catch(e){}
+}
+async function loadHourlyWage(){
+  try{
+    const res = await window.storage.get('settings:hourlyWage', false);
+    if(res && res.value){ state.hourlyWage = Number(res.value) || 0; }
+  }catch(e){}
+}
+async function saveHourlyWage(wage){
+  state.hourlyWage = wage;
+  try{ await window.storage.set('settings:hourlyWage', String(wage), false); }catch(e){}
 }
 async function saveCompanyLocation(){
   try{
@@ -767,6 +778,23 @@ function formatMinutes(mins){
 function formatDuration(clockIn, clockOut){
   return formatMinutes(durationMinutes(clockIn, clockOut));
 }
+function computeThisMonthPay(){
+  const now = new Date();
+  const monthPrefix = `${now.getFullYear()}-${pad2(now.getMonth()+1)}`;
+  const entries = state.workLog.filter(e => e.date.startsWith(monthPrefix) && e.clockIn && e.clockOut);
+  const totalMinutes = entries.reduce((sum,e)=> sum + durationMinutes(e.clockIn, e.clockOut), 0);
+  const pay = Math.round((totalMinutes/60) * (state.hourlyWage || 0));
+  return { totalMinutes, pay };
+}
+async function setHourlyWage(){
+  const cur = state.hourlyWage ? String(state.hourlyWage) : '';
+  const input = prompt('시급을 숫자로 입력해줘 (원)', cur);
+  if(input === null) return;
+  const n = parseInt(input.replace(/[^0-9]/g,''), 10);
+  if(isNaN(n)){ alert('숫자만 입력해줘.'); return; }
+  await saveHourlyWage(n);
+  render();
+}
 function lastSendFor(propertyId){
   for(let i = state.photoLog.length - 1; i >= 0; i--){
     if(state.photoLog[i].propertyId === propertyId) return state.photoLog[i];
@@ -858,6 +886,19 @@ function render(){
   }
 }
 
+function renderClockReadOnly(){
+  const entry = getWorkEntry(state.selectedDate);
+  if(!entry || (!entry.clockIn && !entry.clockOut)) return '';
+  return `
+    <div class="clock-card">
+      <div style="font-size:13px;color:var(--ink-soft);">
+        🕒 출근 ${entry.clockIn || '-'} · 🏁 퇴근 ${entry.clockOut || '-'}
+        ${(entry.clockIn && entry.clockOut) ? ` · ${formatDuration(entry.clockIn, entry.clockOut)}` : ''}
+      </div>
+    </div>
+  `;
+}
+
 function renderClockCard(){
   const entry = getWorkEntry(todayStr()) || { clockIn: null, clockOut: null };
   return `
@@ -918,7 +959,7 @@ function renderPickerBody(mode){
   const isTodaySelected = state.selectedDate === todayStr();
   return `
     ${renderScheduleCalendar()}
-    ${(!isEdit && isTodaySelected) ? renderClockCard() : ''}
+    ${isEdit ? '' : (isTodaySelected ? renderClockCard() : renderClockReadOnly())}
     <div class="picker-intro" style="margin-bottom:0;">${isEdit ? `➕ <b>${dateLabel} 업체 추가/제외</b> — 이미 체크한 세탁물·컨디션 진행 상황은 그대로 남아.` : `📋 <b>${dateLabel}</b> 일정을 만들어줘`}</div>
     <div class="paste-box">
       <label>일정·순서 메시지 붙여넣기 (선택)</label>
@@ -1040,7 +1081,7 @@ function renderScheduleCards(){
   }).join('');
 
   return `
-    ${state.selectedDate === todayStr() ? renderClockCard() : ''}
+    ${state.selectedDate === todayStr() ? renderClockCard() : renderClockReadOnly()}
     <div class="summary">
       <div class="date">${renderDateLabel()}</div>
       <div class="count-row">
@@ -1117,6 +1158,8 @@ function renderAll(){
         <div style="margin-top:8px;display:flex;flex-direction:column;gap:8px;">
           <button class="pill-btn" id="bulkParkingBtn">🚗 여러 업체에 주차등록 정보 한번에 적용</button>
           <button class="pill-btn" id="cleanupAddressBtn">🧹 주소 띄어쓰기 한번에 정리</button>
+          <button class="pill-btn" id="setHourlyWageBtn">💰 시급 ${state.hourlyWage ? state.hourlyWage.toLocaleString()+'원' : '설정하기'}</button>
+          ${state.hourlyWage ? `<div style="font-size:12px;color:var(--ink-soft);padding:0 4px;">이번달 예상 급여: ${formatMinutes(computeThisMonthPay().totalMinutes)} · ${computeThisMonthPay().pay.toLocaleString()}원</div>` : ''}
           <button class="pill-btn" id="exportWorkLogBtn">📤 출퇴근 기록 CSV로 내보내기</button>
         </div>
       ` : ''}
@@ -1235,10 +1278,17 @@ async function selectScheduleDate(dateKey){
 }
 
 function exportWorkLogCSV(){
-  const rows = [['날짜','출근','퇴근','근무시간']];
+  const hasWage = !!state.hourlyWage;
+  const header = hasWage ? ['날짜','출근','퇴근','근무시간','예상급여(원)'] : ['날짜','출근','퇴근','근무시간'];
+  const rows = [header];
   state.workLog.slice().sort((a,b)=>a.date.localeCompare(b.date)).forEach(e=>{
     const duration = (e.clockIn && e.clockOut) ? formatDuration(e.clockIn, e.clockOut) : '';
-    rows.push([e.date, e.clockIn || '', e.clockOut || '', duration]);
+    const row = [e.date, e.clockIn || '', e.clockOut || '', duration];
+    if(hasWage){
+      const pay = (e.clockIn && e.clockOut) ? Math.round((durationMinutes(e.clockIn, e.clockOut)/60) * state.hourlyWage) : '';
+      row.push(pay);
+    }
+    rows.push(row);
   });
   const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
   const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
@@ -1698,6 +1748,8 @@ function attachHandlers(){
   });
   const exportWorkLogBtn = document.getElementById('exportWorkLogBtn');
   if(exportWorkLogBtn) exportWorkLogBtn.onclick = exportWorkLogCSV;
+  const setHourlyWageBtn = document.getElementById('setHourlyWageBtn');
+  if(setHourlyWageBtn) setHourlyWageBtn.onclick = setHourlyWage;
 }
 
 function togglePick(id){
@@ -1890,6 +1942,7 @@ document.getElementById('fab').onclick = ()=> openEditSheet(null);
   // 오늘 리스트는 기본적으로 접힌 상태로 시작 (state.openJobIds는 빈 Set 그대로 둠)
   await loadKakaoKey();
   await loadCompanyLocation();
+  await loadHourlyWage();
   await loadGeocodeCache();
   await loadPhotoLog();
   await loadReportLog();
