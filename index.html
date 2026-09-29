@@ -1050,6 +1050,9 @@ function renderScheduleCards(){
             <div class="meta-addr">🧭 ${esc(p.address)}</div>
             <div>OUT ${esc(p.out)} · IN ${esc(p.in)}${p.rooms ? ` · 룸/화장실 ${esc(p.rooms)}` : ''}${p.beds ? ` · ${esc(p.beds)}` : ''}</div>
           </div>
+          <div class="job-row" style="margin-top:8px;">
+            <button class="priority-toggle ${isPriority?'active':''}" data-toggle-priority="${id}">🔴 당일체크인${isPriority?' 해제':''}</button>
+          </div>
           <div class="pw-row">
             <span class="pw-icon">🔑</span>
             <input class="pw-edit" data-pw-edit="${id}" value="${esc(p.password)}" placeholder="비밀번호 없음">
@@ -1303,7 +1306,7 @@ function exportWorkLogCSV(){
 }
 
 function openEditSheet(prop){
-  state.editing = prop ? {...prop} : {id:null,name:'',owner:'',phone:'',address:'',password:'',out:'',in:'',rooms:'',beds:'',notes:'',parkingUrl:'',parkingId:'',parkingPw:''};
+  state.editing = prop ? {...prop} : {id:null,name:'',owner:'',phone:'',address:'',password:'',out:'',in:'',rooms:'',beds:'',notes:'',parkingUrl:'',parkingId:'',parkingPw:'',alwaysPriority:false};
   const e = state.editing;
   const root = document.createElement('div');
   root.className = 'overlay';
@@ -1330,6 +1333,10 @@ function openEditSheet(prop){
         <div class="field"><label>주차등록 아이디</label><input id="f_parkingId" value="${esc(e.parkingId||'')}"></div>
         <div class="field"><label>주차등록 비밀번호</label><input id="f_parkingPw" value="${esc(e.parkingPw||'')}"></div>
       </div>
+      <label class="picker-row" style="margin-top:4px;">
+        <input type="checkbox" id="f_alwaysPriority" ${e.alwaysPriority?'checked':''}>
+        <div style="flex:1;"><div class="pname">항상 당일체크인으로 표시</div><div class="paddr">오늘 리스트에 이 업체가 포함되면 자동으로 🔴 당일 표시가 켜져</div></div>
+      </label>
       <div class="sheet-actions">
         <button class="cancel-btn" id="cancelEdit">취소</button>
         <button class="save-btn" id="saveEdit">저장</button>
@@ -1353,6 +1360,7 @@ function openEditSheet(prop){
       parkingUrl: document.getElementById('f_parkingUrl').value.trim(),
       parkingId: document.getElementById('f_parkingId').value.trim(),
       parkingPw: document.getElementById('f_parkingPw').value.trim(),
+      alwaysPriority: document.getElementById('f_alwaysPriority').checked,
     };
     if(!vals.name){ alert('상호명은 필수야.'); return; }
     if(e.id){
@@ -1548,6 +1556,9 @@ function attachHandlers(){
       else state.pickerPriority.add(id);
       render();
     };
+  });
+  document.querySelectorAll('[data-toggle-priority]').forEach(el=>{
+    el.onclick = ()=> togglePriority(el.dataset.togglePriority);
   });
   const confirmBtn = document.getElementById('confirmPick');
   if(confirmBtn) confirmBtn.onclick = createTodayList;
@@ -1819,6 +1830,16 @@ function parseInTimeForSort(inVal){
   return isNaN(n) ? 9999 : n; // 체크인 시간 없으면 맨 뒤로
 }
 
+async function togglePriority(id){
+  if(!state.todayRecord.priorityIds) state.todayRecord.priorityIds = [];
+  const priorityIds = state.todayRecord.priorityIds;
+  const idx = priorityIds.indexOf(id);
+  if(idx === -1) priorityIds.push(id);
+  else priorityIds.splice(idx, 1);
+  await saveTodayRecord();
+  render();
+}
+
 async function moveJobCard(id, direction){
   const ids = state.todayRecord.propertyIds;
   const idx = ids.indexOf(id);
@@ -1844,6 +1865,11 @@ async function addTaskBack(id, text){
 function buildOrderedRecord(){
   const tasks = {};
   const selected = Array.from(state.pickerSelection);
+  // 항상 당일체크인으로 표시하도록 지정해둔 업체는 자동으로 우선순위에 포함
+  selected.forEach(id=>{
+    const p = propById(id);
+    if(p && p.alwaysPriority) state.pickerPriority.add(id);
+  });
   const sortByPriorityAndTime = (a,b)=>{
     const pa = state.pickerPriority.has(a) ? 0 : 1;
     const pb = state.pickerPriority.has(b) ? 0 : 1;
@@ -1900,6 +1926,11 @@ async function applyEditToday(){
   const existingTasks = state.todayRecord.tasks;
   const existingExcluded = state.todayRecord.excludedIds || [];
   const newSelection = Array.from(state.pickerSelection);
+  // 항상 당일체크인으로 표시하도록 지정해둔 업체는 자동으로 우선순위에 포함
+  newSelection.forEach(id=>{
+    const p = propById(id);
+    if(p && p.alwaysPriority) state.pickerPriority.add(id);
+  });
   // 기존에 있던 곳은 순서·진행상황 그대로 유지, 새로 체크한 곳만 뒤에 추가
   const kept = existingIds.filter(id => state.pickerSelection.has(id));
   const removed = existingIds.filter(id => !state.pickerSelection.has(id));
