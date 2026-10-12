@@ -144,6 +144,12 @@
     font-size:12px;color:var(--ink-soft);margin-top:10px;padding-bottom:10px;
     border-bottom:1px solid var(--paper-line);
   }
+  .photo-strip{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;}
+  .pthumb{width:64px;height:64px;object-fit:cover;border-radius:8px;border:1px solid var(--paper-line,#ddd);cursor:pointer;}
+  .photo-view{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:10000;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:12px;}
+  .photo-view img{max-width:100%;max-height:78vh;object-fit:contain;border-radius:6px;}
+  .photo-view .pv-actions{display:flex;gap:10px;margin-top:14px;}
+  .photo-view button{padding:10px 18px;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;}
   .assign-row{display:flex;align-items:center;gap:8px;margin-top:8px;}
   .assign-row select{flex:1;padding:8px;border-radius:8px;border:1px solid var(--paper-line);font-size:14px;font-family:var(--sans);background:#fff;}
   .warn-line{font-size:12px;color:var(--clay);margin-top:4px;line-height:1.4;}
@@ -448,6 +454,7 @@ let state = {
   companyLocation: null,
   hourlyWage: 0,
   staff: [],
+  photos: {}, // {propId:[{id,ts,by,thumb}]} 선택한 날짜 기준
   mapScope: 'today', // 'today' | 'all'
   mapReady: false,
   geocodeCache: {},
@@ -616,6 +623,58 @@ function staffAssignedProps(stId){
   if(!r) return [];
   return r.propertyIds.filter(id => (r.assign||{})[id] === stId);
 }
+// 전달 표시 (이 폰에만 저장)
+const sentKey = ()=> 'sent:'+state.selectedDate;
+function getSent(){ try{ return JSON.parse(localStorage.getItem(sentKey())||'{}'); }catch(e){ return {}; } }
+function markSent(stId){ const m = getSent(); m[stId] = Date.now(); try{ localStorage.setItem(sentKey(), JSON.stringify(m)); }catch(e){} }
+function fmtClock(ts){ const d = new Date(ts); return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
+function smsHref(phone, body){
+  const ios = /iPhone|iPad|iPod/.test(navigator.userAgent);
+  return 'sms:'+String(phone).replace(/[^0-9+]/g,'')+(ios?'&':'?')+'body='+encodeURIComponent(body);
+}
+async function shareOrCopy(text){
+  if(navigator.share){ try{ await navigator.share({ text }); return true; }catch(e){ if(e && e.name==='AbortError') return false; } }
+  try{ await navigator.clipboard.writeText(text); alert('복사했어. 카톡에 붙여넣어줘.'); return true; }
+  catch(e){ prompt('아래 문구를 복사해줘', text); return true; }
+}
+function getTemplates(){ try{ return JSON.parse(localStorage.getItem('pref:noticeTpl')||'[]'); }catch(e){ return []; } }
+function saveTemplates(a){ try{ localStorage.setItem('pref:noticeTpl', JSON.stringify(a.slice(0,8))); }catch(e){} }
+function openNoticeSheet(){
+  const root = document.createElement('div');
+  root.className='overlay'; root.id='overlay';
+  const draw = ()=>{
+    const tpls = getTemplates();
+    const avail = state.staff.filter(st=>!staffUnavailable(st));
+    const unavail = state.staff.filter(st=>staffUnavailable(st));
+    const row = st => `<div class="staff-item"><div style="flex:1;"><span class="sname">${esc(st.name)}</span>${staffUnavailable(st)?' <span style="color:var(--clay);font-size:11px;">오늘 불가</span>':''}</div>
+      ${st.phone?`<button data-nt-sms="${st.id}">문자</button>`:''}<button data-nt-share="${st.id}">카톡/복사</button></div>`;
+    root.innerHTML = `
+      <div class="sheet">
+        <h2>📢 공지 보내기</h2>
+        ${tpls.length?`<div class="field"><label>저장한 문구</label><select id="nt_tpl"><option value="">불러오기…</option>${tpls.map((t,i)=>`<option value="${i}">${esc(t.slice(0,24))}</option>`).join('')}</select></div>`:''}
+        <textarea id="nt_text" class="day-note" style="min-height:110px;" placeholder="보낼 공지 문구를 적어줘">${esc(root._text||'')}</textarea>
+        <label style="display:flex;align-items:center;gap:6px;font-size:14px;margin:8px 0;"><input type="checkbox" id="nt_greet" ${root._greet===false?'':'checked'}>맨 앞에 "○○님, " 붙이기</label>
+        <div style="max-height:34vh;overflow-y:auto;">${avail.map(row).join('')}${unavail.length?`<div style="font-size:12px;color:var(--ink-soft);padding:8px 0 0;">이 날 근무 불가</div>`+unavail.map(row).join(''):''}</div>
+        <div class="sheet-actions" style="flex-wrap:wrap;">
+          <button class="cancel-btn" id="nt_close">닫기</button>
+          <button class="cancel-btn" id="nt_save">문구 저장</button>
+        </div>
+      </div>`;
+    const ta = document.getElementById('nt_text'), gr = document.getElementById('nt_greet');
+    const msgFor = st => (gr.checked ? st.name+'님, ' : '') + ta.value.trim();
+    const need = ()=>{ if(!ta.value.trim()){ alert('공지 문구를 먼저 적어줘.'); return false; } return true; };
+    ta.oninput = ()=>{ root._text = ta.value; };
+    gr.onchange = ()=>{ root._greet = gr.checked; };
+    document.getElementById('nt_close').onclick = ()=> root.remove();
+    document.getElementById('nt_save').onclick = ()=>{ if(!need()) return; const a = getTemplates().filter(x=>x!==ta.value.trim()); a.unshift(ta.value.trim()); saveTemplates(a); root._text = ta.value; draw(); };
+    const tp = document.getElementById('nt_tpl');
+    if(tp) tp.onchange = ()=>{ if(tp.value!==''){ root._text = getTemplates()[Number(tp.value)]; draw(); } };
+    root.querySelectorAll('[data-nt-sms]').forEach(b=> b.onclick = ()=>{ if(!need()) return; const st = staffById(b.dataset.ntSms); location.href = smsHref(st.phone, msgFor(st)); });
+    root.querySelectorAll('[data-nt-share]').forEach(b=> b.onclick = async ()=>{ if(!need()) return; const st = staffById(b.dataset.ntShare); await shareOrCopy(msgFor(st)); });
+  };
+  document.body.appendChild(root);
+  draw();
+}
 function buildPersonalText(st, withPw){
   const r = state.todayRecord;
   const ids = staffAssignedProps(st.id);
@@ -658,11 +717,10 @@ function openPersonalSheet(stId){
   document.getElementById('pm_pw').onchange = (e)=>{ try{ localStorage.setItem('pref:msgPw', e.target.checked?'1':'0'); }catch(_){} refresh(); };
   document.getElementById('pm_close').onclick = ()=> root.remove();
   const sms = document.getElementById('pm_sms');
-  if(sms) sms.onclick = ()=>{ location.href = 'sms:'+st.phone.replace(/[^0-9+]/g,'')+'&body='+encodeURIComponent(ta.value); };
+  if(sms) sms.onclick = ()=>{ markSent(st.id); render(); location.href = smsHref(st.phone, ta.value); };
   document.getElementById('pm_share').onclick = async ()=>{
-    const text = ta.value;
-    if(navigator.share){ try{ await navigator.share({text}); return; }catch(e){ if(e && e.name==='AbortError') return; } }
-    try{ await navigator.clipboard.writeText(text); alert('복사했어. 카톡에 붙여넣기 해줘.'); }catch(e){ ta.select(); alert('텍스트를 길게 눌러 복사해줘.'); }
+    const done = await shareOrCopy(ta.value);
+    if(done){ markSent(st.id); render(); }
   };
 }
 async function importStaffJson(){
@@ -695,7 +753,7 @@ function renderStaffTab(){
           <button class="pill-btn" data-staff-edit="${st.id}">수정</button>
         </div>
         <div style="font-size:13px;margin-top:8px;">${props.length?`배정 ${props.length}곳: `+props.map(p=>esc(p.name)).join(', '):'<span style="color:var(--ink-soft);">배정 없음</span>'}</div>
-        ${props.length?`<button class="pill-btn" data-staff-msg="${st.id}" style="margin-top:8px;">✉️ ${esc(st.name)}님께 보내기</button>`:''}
+        ${props.length?`<button class="pill-btn" data-staff-msg="${st.id}" style="margin-top:8px;">✉️ ${esc(st.name)}님께 보내기</button>${getSent()[st.id]?` <span style="font-size:12px;color:var(--teal);">✅ ${fmtClock(getSent()[st.id])} 전달함</span>`:''}`:''}
       </div></div>`;
   };
   return `
@@ -703,6 +761,7 @@ function renderStaffTab(){
       <div style="font-size:12px;color:var(--ink-soft);">날짜는 일정 탭에서 바꿔 · 가능 ${avail.length}명 / 불가 ${unavail.length}명</div></div>
     ${state.staff.length ? avail.map(card).join('') + (unavail.length?`<div style="font-size:12px;color:var(--ink-soft);margin:12px 0 6px;">이 날 근무 불가</div>`+unavail.map(card).join(''):'') : '<div class="empty">등록된 직원이 없어.<br>아래에서 추가하거나 JSON을 붙여넣어줘.</div>'}
     <div style="display:flex;gap:8px;margin-top:12px;">
+      <button class="pill-btn" id="noticeBtn">📢 공지 보내기</button>
       <button class="pill-btn" id="staffAddBtn">+ 직원 추가</button>
       <button class="pill-btn" id="staffImportBtn">JSON 붙여넣기</button>
     </div>`;
@@ -710,8 +769,123 @@ function renderStaffTab(){
 function attachStaffHandlers(){
   document.querySelectorAll('[data-staff-edit]').forEach(b=> b.onclick = ()=> openStaffEditSheet(staffById(b.dataset.staffEdit)));
   document.querySelectorAll('[data-staff-msg]').forEach(b=> b.onclick = ()=> openPersonalSheet(b.dataset.staffMsg));
+  const nb=document.getElementById('noticeBtn'); if(nb) nb.onclick = openNoticeSheet;
   const a=document.getElementById('staffAddBtn'); if(a) a.onclick = ()=> openStaffEditSheet(null);
   const i=document.getElementById('staffImportBtn'); if(i) i.onclick = importStaffJson;
+}
+// ===== 사진 (서버 저장: 작은 썸네일 문서 + 확인용 큰 사진 문서) =====
+function loadImageEl(file){
+  return new Promise((res,rej)=>{
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = ()=>{ URL.revokeObjectURL(url); res(img); };
+    img.onerror = ()=>{ URL.revokeObjectURL(url); rej(new Error('이미지를 열 수 없어')); };
+    img.src = url;
+  });
+}
+function imgToDataUrl(img, maxDim, quality){
+  const r = Math.min(1, maxDim / Math.max(img.width, img.height));
+  const w = Math.max(1, Math.round(img.width * r)), h = Math.max(1, Math.round(img.height * r));
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  c.getContext('2d').drawImage(img, 0, 0, w, h);
+  return c.toDataURL('image/jpeg', quality);
+}
+async function uploadPhotos(propId, files){
+  const date = state.selectedDate;
+  let ok = 0;
+  for(const file of files){
+    try{
+      const img = await loadImageEl(file);
+      let full = imgToDataUrl(img, 1280, 0.72);
+      if(full.length > 700000) full = imgToDataUrl(img, 1000, 0.6);
+      const thumb = imgToDataUrl(img, 240, 0.6);
+      const id = date+'_'+propId+'_'+Date.now()+'_'+Math.random().toString(36).slice(2,6);
+      const base = { pdate: date, propId, id, ts: Date.now(), by: cloud.user.email };
+      await cloud.fn.setDoc(kvDoc('pf:'+id), { ...base, kind:'full', data: full });
+      await cloud.fn.setDoc(kvDoc('photo:'+id), { ...base, kind:'thumb', thumb });
+      ok++;
+    }catch(e){ alert('사진 올리기에 실패했어: '+(e.message||e)); }
+  }
+  return ok;
+}
+function pickPhotos(propId, btn){
+  const input = document.createElement('input');
+  input.type = 'file'; input.accept = 'image/*'; input.multiple = true;
+  input.onchange = async ()=>{
+    const files = Array.from(input.files||[]);
+    if(!files.length) return;
+    if(btn){ btn.disabled = true; btn.textContent = '올리는 중…'; }
+    await uploadPhotos(propId, files);
+    if(btn){ btn.disabled = false; btn.textContent = '📷 사진 추가'; }
+  };
+  input.click();
+}
+function watchPhotos(){
+  if(unsubs.photos){ unsubs.photos(); unsubs.photos = null; }
+  state.photos = {};
+  const q = cloud.fn.query(cloud.fn.collection(cloud.db,'kv'),
+    cloud.fn.where('pdate','==',state.selectedDate), cloud.fn.where('kind','==','thumb'));
+  unsubs.photos = cloud.fn.onSnapshot(q, snap=>{
+    const m = {};
+    snap.forEach(d=>{ const x = d.data(); (m[x.propId] = m[x.propId] || []).push({ id:x.id, ts:x.ts, by:x.by, thumb:x.thumb }); });
+    Object.values(m).forEach(a=>a.sort((a,b)=>a.ts-b.ts));
+    state.photos = m;
+    safeRender();
+  }, ()=>{});
+}
+async function openPhotoViewer(photoId){
+  let info = null;
+  Object.values(state.photos).forEach(a=>a.forEach(t=>{ if(t.id===photoId) info = t; }));
+  const root = document.createElement('div');
+  root.className = 'photo-view';
+  root.innerHTML = '<div style="color:#fff;">불러오는 중…</div>';
+  document.body.appendChild(root);
+  const close = ()=> root.remove();
+  try{
+    const snap = await cloud.fn.getDoc(kvDoc('pf:'+photoId));
+    if(!snap.exists()) throw new Error('사진 없음');
+    const canDel = isAdmin() || (info && cloud.user && info.by === cloud.user.email);
+    root.innerHTML = `<img src="${snap.data().data}">
+      <div class="pv-actions">
+        <button id="pvClose">닫기</button>
+        ${canDel ? '<button id="pvDel" style="background:#b3402a;color:#fff;">삭제</button>' : ''}
+      </div>`;
+    document.getElementById('pvClose').onclick = close;
+    const del = document.getElementById('pvDel');
+    if(del) del.onclick = async ()=>{
+      if(!confirm('이 사진을 삭제할까?')) return;
+      await cloud.fn.deleteDoc(kvDoc('pf:'+photoId));
+      await cloud.fn.deleteDoc(kvDoc('photo:'+photoId));
+      close();
+    };
+  }catch(e){
+    root.innerHTML = '<div style="color:#fff;">사진을 불러오지 못했어.</div><div class="pv-actions"><button id="pvClose">닫기</button></div>';
+    document.getElementById('pvClose').onclick = close;
+  }
+}
+async function collectPhotoFiles(propId){
+  const p = propById(propId);
+  const list = state.photos[propId] || [];
+  const files = [];
+  for(const t of list){
+    try{
+      const snap = await cloud.fn.getDoc(kvDoc('pf:'+t.id));
+      if(!snap.exists()) continue;
+      const blob = await (await fetch(snap.data().data)).blob();
+      files.push(new File([blob], (p?p.name:'photo')+'_'+(files.length+1)+'.jpg', { type:'image/jpeg' }));
+    }catch(e){}
+  }
+  return files;
+}
+async function cleanupOldPhotos(){
+  if(!isAdmin()) return;
+  const d = new Date(); d.setDate(d.getDate()-30);
+  const cutoff = d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+  if(!confirm(cutoff+' 이전 사진을 모두 삭제할까? 되돌릴 수 없어.')) return;
+  const snap = await cloud.fn.getDocs(cloud.fn.query(cloud.fn.collection(cloud.db,'kv'), cloud.fn.where('pdate','<',cutoff)));
+  let n = 0;
+  for(const dd of snap.docs){ await cloud.fn.deleteDoc(dd.ref); n++; }
+  alert(n+'개 문서를 삭제했어.');
 }
 async function loadKakaoKey(){
   try{
@@ -954,7 +1128,11 @@ function triggerCompletionReport(propertyId){
   const message = `${dateLabel} ${p.name} 확인했습니다.`;
   const doShare = async ()=>{
     try{
-      if(navigator.share){
+      const files = await collectPhotoFiles(propertyId);
+      if(files.length && navigator.canShare && navigator.canShare({ files })){
+        await navigator.share({ files, title: '컨디션체크 완료', text: message });
+      } else if(navigator.share){
+        if(files.length) alert('이 기기에서는 사진 공유가 안 돼서 문구만 보낼게.');
         await navigator.share({ title: '컨디션체크 완료', text: message });
       } else {
         alert('이 브라우저에서는 자동 공유가 안 돼. 아래 문구를 복사해서 직접 보내줘.\n\n' + message);
@@ -1341,12 +1519,16 @@ function renderScheduleCards(){
               ${(p.parkingId||p.parkingPw) ? `<span class="pw-value">${esc(p.parkingId)} / ${esc(p.parkingPw)}</span>` : ''}
             </div>
           </div>` : ''}
+          <div class="photo-strip">${(state.photos[id]||[]).map(t=>`<img class="pthumb" src="${t.thumb}" data-photo="${t.id}">`).join('')}</div>
+          <div class="job-row" style="margin-top:8px;">
+            <button class="pill-btn" data-photo-add="${id}">📷 사진 추가</button>
+          </div>
           <div class="section-divider"></div>
           <div class="task-list">${taskRows}</div>
           ${missingRow}
           ${conditionDone ? `
           <div class="job-row" style="margin-top:10px;">
-            <button class="pill-btn" data-report="${id}" style="background:var(--teal-soft);color:var(--teal);">📨 완료 보고하기</button>
+            <button class="pill-btn" data-report="${id}" style="background:var(--teal-soft);color:var(--teal);">📨 완료 보고하기${(state.photos[id]||[]).length ? ' (사진 '+(state.photos[id]||[]).length+'장 포함)' : ''}</button>
           </div>
           ${lastReportFor(id) ? `<div class="task-meta">최근 보고: ${formatSendTime(lastReportFor(id).ts)}</div>` : ''}
           ` : ''}
@@ -1434,6 +1616,7 @@ function renderAll(){
         <div style="margin-top:8px;display:flex;flex-direction:column;gap:8px;">
           ${isAdmin() ? `<button class="pill-btn" id="bulkParkingBtn">🚗 여러 업체에 주차등록 정보 한번에 적용</button>
           <button class="pill-btn" id="cleanupAddressBtn">🧹 주소 띄어쓰기 한번에 정리</button>
+          <button class="pill-btn" id="cleanupPhotosBtn">🗑️ 30일 지난 사진 정리</button>
           <button class="pill-btn" id="uploadLocalBtn">☁️ 이 폰의 데이터를 서버로 올리기</button>` : ''}
           <button class="pill-btn" id="setHourlyWageBtn">💰 시급 ${state.hourlyWage ? state.hourlyWage.toLocaleString()+'원' : '설정하기'}</button>
           ${state.hourlyWage ? `<div style="font-size:12px;color:var(--ink-soft);padding:0 4px;">이번달 예상 급여: ${formatMinutes(computeThisMonthPay().totalMinutes)} · ${computeThisMonthPay().pay.toLocaleString()}원</div>` : ''}
@@ -1553,6 +1736,7 @@ async function selectScheduleDate(dateKey){
   state.calPasteResultMsg = '';
   await loadTodayRecord();
   watchToday();
+  if(cloud && cloud.user) watchPhotos();
   render();
 }
 
@@ -1956,6 +2140,10 @@ function attachHandlers(){
   document.querySelectorAll('[data-edit]').forEach(el=>{
     el.onclick = (ev)=>{ ev.stopPropagation(); openEditSheet(propById(el.dataset.edit)); };
   });
+  document.querySelectorAll('[data-photo-add]').forEach(el=> el.onclick = ()=> pickPhotos(el.dataset.photoAdd, el));
+  document.querySelectorAll('[data-photo]').forEach(el=> el.onclick = ()=> openPhotoViewer(el.dataset.photo));
+  const cleanupPhotosBtn = document.getElementById('cleanupPhotosBtn');
+  if(cleanupPhotosBtn) cleanupPhotosBtn.onclick = cleanupOldPhotos;
   const uploadLocalBtn = document.getElementById('uploadLocalBtn');
   if(uploadLocalBtn) uploadLocalBtn.onclick = uploadLocalData;
   const logoutBtn = document.getElementById('logoutBtn');
@@ -1991,9 +2179,6 @@ function attachHandlers(){
     };
   });
 
-  document.querySelectorAll('[data-photo]').forEach(el=>{
-    el.onclick = ()=> triggerPhotoShare(el.dataset.photo);
-  });
   document.querySelectorAll('[data-report]').forEach(el=>{
     el.onclick = ()=> triggerCompletionReport(el.dataset.report);
   });
@@ -2306,6 +2491,7 @@ function watchShared(){
     safeRender();
   });
   watchToday();
+  watchPhotos();
 }
 async function uploadLocalData(){
   if(!isAdmin()) return;
