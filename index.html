@@ -390,7 +390,6 @@ let state = {
   editing: null, // property object being edited, or {} for new
   kakaoKey: null,
   companyLocation: null,
-  hourlyWage: 0,
   mapScope: 'today', // 'today' | 'all'
   mapReady: false,
   geocodeCache: {},
@@ -482,16 +481,6 @@ async function loadCompanyLocation(){
     const res = await window.storage.get('settings:companyLocation', false);
     if(res && res.value){ state.companyLocation = JSON.parse(res.value); }
   }catch(e){}
-}
-async function loadHourlyWage(){
-  try{
-    const res = await window.storage.get('settings:hourlyWage', false);
-    if(res && res.value){ state.hourlyWage = Number(res.value) || 0; }
-  }catch(e){}
-}
-async function saveHourlyWage(wage){
-  state.hourlyWage = wage;
-  try{ await window.storage.set('settings:hourlyWage', String(wage), false); }catch(e){}
 }
 async function saveCompanyLocation(){
   try{
@@ -778,23 +767,6 @@ function formatMinutes(mins){
 function formatDuration(clockIn, clockOut){
   return formatMinutes(durationMinutes(clockIn, clockOut));
 }
-function computeThisMonthPay(){
-  const now = new Date();
-  const monthPrefix = `${now.getFullYear()}-${pad2(now.getMonth()+1)}`;
-  const entries = state.workLog.filter(e => e.date.startsWith(monthPrefix) && e.clockIn && e.clockOut);
-  const totalMinutes = entries.reduce((sum,e)=> sum + durationMinutes(e.clockIn, e.clockOut), 0);
-  const pay = Math.round((totalMinutes/60) * (state.hourlyWage || 0));
-  return { totalMinutes, pay };
-}
-async function setHourlyWage(){
-  const cur = state.hourlyWage ? String(state.hourlyWage) : '';
-  const input = prompt('시급을 숫자로 입력해줘 (원)', cur);
-  if(input === null) return;
-  const n = parseInt(input.replace(/[^0-9]/g,''), 10);
-  if(isNaN(n)){ alert('숫자만 입력해줘.'); return; }
-  await saveHourlyWage(n);
-  render();
-}
 function lastSendFor(propertyId){
   for(let i = state.photoLog.length - 1; i >= 0; i--){
     if(state.photoLog[i].propertyId === propertyId) return state.photoLog[i];
@@ -886,19 +858,6 @@ function render(){
   }
 }
 
-function renderClockReadOnly(){
-  const entry = getWorkEntry(state.selectedDate);
-  if(!entry || (!entry.clockIn && !entry.clockOut)) return '';
-  return `
-    <div class="clock-card">
-      <div style="font-size:13px;color:var(--ink-soft);">
-        🕒 출근 ${entry.clockIn || '-'} · 🏁 퇴근 ${entry.clockOut || '-'}
-        ${(entry.clockIn && entry.clockOut) ? ` · ${formatDuration(entry.clockIn, entry.clockOut)}` : ''}
-      </div>
-    </div>
-  `;
-}
-
 function renderClockCard(){
   const entry = getWorkEntry(todayStr()) || { clockIn: null, clockOut: null };
   return `
@@ -959,7 +918,7 @@ function renderPickerBody(mode){
   const isTodaySelected = state.selectedDate === todayStr();
   return `
     ${renderScheduleCalendar()}
-    ${isEdit ? '' : (isTodaySelected ? renderClockCard() : renderClockReadOnly())}
+    ${(!isEdit && isTodaySelected) ? renderClockCard() : ''}
     <div class="picker-intro" style="margin-bottom:0;">${isEdit ? `➕ <b>${dateLabel} 업체 추가/제외</b> — 이미 체크한 세탁물·컨디션 진행 상황은 그대로 남아.` : `📋 <b>${dateLabel}</b> 일정을 만들어줘`}</div>
     <div class="paste-box">
       <label>일정·순서 메시지 붙여넣기 (선택)</label>
@@ -1050,9 +1009,6 @@ function renderScheduleCards(){
             <div class="meta-addr">🧭 ${esc(p.address)}</div>
             <div>OUT ${esc(p.out)} · IN ${esc(p.in)}${p.rooms ? ` · 룸/화장실 ${esc(p.rooms)}` : ''}${p.beds ? ` · ${esc(p.beds)}` : ''}</div>
           </div>
-          <div class="job-row" style="margin-top:8px;">
-            <button class="priority-toggle ${isPriority?'active':''}" data-toggle-priority="${id}">🔴 당일체크인${isPriority?' 해제':''}</button>
-          </div>
           <div class="pw-row">
             <span class="pw-icon">🔑</span>
             <input class="pw-edit" data-pw-edit="${id}" value="${esc(p.password)}" placeholder="비밀번호 없음">
@@ -1084,7 +1040,7 @@ function renderScheduleCards(){
   }).join('');
 
   return `
-    ${state.selectedDate === todayStr() ? renderClockCard() : renderClockReadOnly()}
+    ${state.selectedDate === todayStr() ? renderClockCard() : ''}
     <div class="summary">
       <div class="date">${renderDateLabel()}</div>
       <div class="count-row">
@@ -1161,8 +1117,6 @@ function renderAll(){
         <div style="margin-top:8px;display:flex;flex-direction:column;gap:8px;">
           <button class="pill-btn" id="bulkParkingBtn">🚗 여러 업체에 주차등록 정보 한번에 적용</button>
           <button class="pill-btn" id="cleanupAddressBtn">🧹 주소 띄어쓰기 한번에 정리</button>
-          <button class="pill-btn" id="setHourlyWageBtn">💰 시급 ${state.hourlyWage ? state.hourlyWage.toLocaleString()+'원' : '설정하기'}</button>
-          ${state.hourlyWage ? `<div style="font-size:12px;color:var(--ink-soft);padding:0 4px;">이번달 예상 급여: ${formatMinutes(computeThisMonthPay().totalMinutes)} · ${computeThisMonthPay().pay.toLocaleString()}원</div>` : ''}
           <button class="pill-btn" id="exportWorkLogBtn">📤 출퇴근 기록 CSV로 내보내기</button>
         </div>
       ` : ''}
@@ -1281,17 +1235,10 @@ async function selectScheduleDate(dateKey){
 }
 
 function exportWorkLogCSV(){
-  const hasWage = !!state.hourlyWage;
-  const header = hasWage ? ['날짜','출근','퇴근','근무시간','예상급여(원)'] : ['날짜','출근','퇴근','근무시간'];
-  const rows = [header];
+  const rows = [['날짜','출근','퇴근','근무시간']];
   state.workLog.slice().sort((a,b)=>a.date.localeCompare(b.date)).forEach(e=>{
     const duration = (e.clockIn && e.clockOut) ? formatDuration(e.clockIn, e.clockOut) : '';
-    const row = [e.date, e.clockIn || '', e.clockOut || '', duration];
-    if(hasWage){
-      const pay = (e.clockIn && e.clockOut) ? Math.round((durationMinutes(e.clockIn, e.clockOut)/60) * state.hourlyWage) : '';
-      row.push(pay);
-    }
-    rows.push(row);
+    rows.push([e.date, e.clockIn || '', e.clockOut || '', duration]);
   });
   const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
   const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
@@ -1306,7 +1253,7 @@ function exportWorkLogCSV(){
 }
 
 function openEditSheet(prop){
-  state.editing = prop ? {...prop} : {id:null,name:'',owner:'',phone:'',address:'',password:'',out:'',in:'',rooms:'',beds:'',notes:'',parkingUrl:'',parkingId:'',parkingPw:'',alwaysPriority:false};
+  state.editing = prop ? {...prop} : {id:null,name:'',owner:'',phone:'',address:'',password:'',out:'',in:'',rooms:'',beds:'',notes:'',parkingUrl:'',parkingId:'',parkingPw:''};
   const e = state.editing;
   const root = document.createElement('div');
   root.className = 'overlay';
@@ -1333,10 +1280,6 @@ function openEditSheet(prop){
         <div class="field"><label>주차등록 아이디</label><input id="f_parkingId" value="${esc(e.parkingId||'')}"></div>
         <div class="field"><label>주차등록 비밀번호</label><input id="f_parkingPw" value="${esc(e.parkingPw||'')}"></div>
       </div>
-      <label class="picker-row" style="margin-top:4px;">
-        <input type="checkbox" id="f_alwaysPriority" ${e.alwaysPriority?'checked':''}>
-        <div style="flex:1;"><div class="pname">항상 당일체크인으로 표시</div><div class="paddr">오늘 리스트에 이 업체가 포함되면 자동으로 🔴 당일 표시가 켜져</div></div>
-      </label>
       <div class="sheet-actions">
         <button class="cancel-btn" id="cancelEdit">취소</button>
         <button class="save-btn" id="saveEdit">저장</button>
@@ -1360,7 +1303,6 @@ function openEditSheet(prop){
       parkingUrl: document.getElementById('f_parkingUrl').value.trim(),
       parkingId: document.getElementById('f_parkingId').value.trim(),
       parkingPw: document.getElementById('f_parkingPw').value.trim(),
-      alwaysPriority: document.getElementById('f_alwaysPriority').checked,
     };
     if(!vals.name){ alert('상호명은 필수야.'); return; }
     if(e.id){
@@ -1556,9 +1498,6 @@ function attachHandlers(){
       else state.pickerPriority.add(id);
       render();
     };
-  });
-  document.querySelectorAll('[data-toggle-priority]').forEach(el=>{
-    el.onclick = ()=> togglePriority(el.dataset.togglePriority);
   });
   const confirmBtn = document.getElementById('confirmPick');
   if(confirmBtn) confirmBtn.onclick = createTodayList;
@@ -1759,8 +1698,6 @@ function attachHandlers(){
   });
   const exportWorkLogBtn = document.getElementById('exportWorkLogBtn');
   if(exportWorkLogBtn) exportWorkLogBtn.onclick = exportWorkLogCSV;
-  const setHourlyWageBtn = document.getElementById('setHourlyWageBtn');
-  if(setHourlyWageBtn) setHourlyWageBtn.onclick = setHourlyWage;
 }
 
 function togglePick(id){
@@ -1830,16 +1767,6 @@ function parseInTimeForSort(inVal){
   return isNaN(n) ? 9999 : n; // 체크인 시간 없으면 맨 뒤로
 }
 
-async function togglePriority(id){
-  if(!state.todayRecord.priorityIds) state.todayRecord.priorityIds = [];
-  const priorityIds = state.todayRecord.priorityIds;
-  const idx = priorityIds.indexOf(id);
-  if(idx === -1) priorityIds.push(id);
-  else priorityIds.splice(idx, 1);
-  await saveTodayRecord();
-  render();
-}
-
 async function moveJobCard(id, direction){
   const ids = state.todayRecord.propertyIds;
   const idx = ids.indexOf(id);
@@ -1865,11 +1792,6 @@ async function addTaskBack(id, text){
 function buildOrderedRecord(){
   const tasks = {};
   const selected = Array.from(state.pickerSelection);
-  // 항상 당일체크인으로 표시하도록 지정해둔 업체는 자동으로 우선순위에 포함
-  selected.forEach(id=>{
-    const p = propById(id);
-    if(p && p.alwaysPriority) state.pickerPriority.add(id);
-  });
   const sortByPriorityAndTime = (a,b)=>{
     const pa = state.pickerPriority.has(a) ? 0 : 1;
     const pb = state.pickerPriority.has(b) ? 0 : 1;
@@ -1926,11 +1848,6 @@ async function applyEditToday(){
   const existingTasks = state.todayRecord.tasks;
   const existingExcluded = state.todayRecord.excludedIds || [];
   const newSelection = Array.from(state.pickerSelection);
-  // 항상 당일체크인으로 표시하도록 지정해둔 업체는 자동으로 우선순위에 포함
-  newSelection.forEach(id=>{
-    const p = propById(id);
-    if(p && p.alwaysPriority) state.pickerPriority.add(id);
-  });
   // 기존에 있던 곳은 순서·진행상황 그대로 유지, 새로 체크한 곳만 뒤에 추가
   const kept = existingIds.filter(id => state.pickerSelection.has(id));
   const removed = existingIds.filter(id => !state.pickerSelection.has(id));
@@ -1973,7 +1890,6 @@ document.getElementById('fab').onclick = ()=> openEditSheet(null);
   // 오늘 리스트는 기본적으로 접힌 상태로 시작 (state.openJobIds는 빈 Set 그대로 둠)
   await loadKakaoKey();
   await loadCompanyLocation();
-  await loadHourlyWage();
   await loadGeocodeCache();
   await loadPhotoLog();
   await loadReportLog();
