@@ -5,7 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
 <title>숙소 관리 수첩</title>
 <style>
-  body.not-admin [data-tab="staff"]{display:none;}
+  body.not-admin [data-tab="staff"], body.not-admin [data-tab="all"]{display:none;}
+  body.company [data-tab="map"]{display:none;}
+  .top-user{position:absolute;right:12px;top:14px;border:1px solid var(--paper-line);background:var(--surface);border-radius:14px;padding:3px 10px;font-size:12px;font-weight:600;cursor:pointer;color:var(--ink-soft);font-family:var(--sans);}
   .login-wrap{position:fixed;inset:0;background:var(--paper,#faf7f2);z-index:9999;display:flex;align-items:center;justify-content:center;padding:24px;}
   .login-box{width:100%;max-width:340px;}
   .login-box h2{margin:0 0 4px;font-size:20px;}
@@ -55,6 +57,7 @@
   }
   .tab.active{color:var(--ink);border-bottom:2px solid var(--teal);}
   main{padding:14px 14px 0 14px;max-width:520px;margin:0 auto;}
+  main.wide{max-width:1100px;}
 
   /* summary bar */
   .summary{
@@ -150,6 +153,32 @@
   .photo-view img{max-width:100%;max-height:78vh;object-fit:contain;border-radius:6px;}
   .photo-view .pv-actions{display:flex;gap:10px;margin-top:14px;}
   .photo-view button{padding:10px 18px;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;}
+  .cal-head{display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap;}
+  .cal-head .ttl{font-size:18px;font-weight:700;flex:1;min-width:110px;}
+  .cal-head button{border:1px solid var(--paper-line);background:var(--surface);border-radius:8px;padding:7px 11px;font-size:13px;font-weight:600;cursor:pointer;font-family:var(--sans);color:var(--ink);}
+  .cal-head button.on{background:var(--ink);color:#fff;border-color:var(--ink);}
+  .mc-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:1px;background:var(--paper-line);border:1px solid var(--paper-line);border-radius:8px;overflow:hidden;}
+  .cal-dow{background:#F4F5F0;text-align:center;font-size:12px;font-weight:700;padding:6px 0;}
+  .cal-cell{background:var(--surface);min-height:84px;padding:3px 2px 4px;cursor:pointer;overflow:hidden;}
+  .cal-cell.out{background:#F7F8F4;}
+  .cal-cell.out .dn{opacity:.4;}
+  .cal-cell.sel{outline:2px solid var(--teal);outline-offset:-2px;}
+  .cal-cell .dn{font-size:11px;font-weight:700;padding:0 2px 2px;display:flex;justify-content:space-between;align-items:center;}
+  .cal-cell .dn .hol{font-size:9px;font-weight:600;color:#c0392b;}
+  .cal-cell .dn .cnt{font-size:9px;font-weight:700;color:var(--ink-soft);}
+  .cal-cell.today .dn b{background:var(--teal);color:#fff;border-radius:10px;padding:0 6px;}
+  .cchip{display:block;font-size:9.5px;line-height:1.35;padding:1px 3px;margin-bottom:2px;border-radius:3px;background:#F3D2C5;color:#5a2a1c;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .cchip.pri{background:#E7B3A0;font-weight:700;}
+  .cchip.done{background:var(--teal-soft);color:var(--teal);}
+  .cchip .fn{display:none;}
+  @media(min-width:700px){ .cchip .fn{display:inline;} .cchip .sn{display:none;} }
+  .red{color:#c0392b;} .blue{color:#2f5fb5;}
+  .cal-list-row{background:var(--surface);border:1px solid var(--paper-line);border-radius:8px;padding:10px 12px;margin-bottom:8px;cursor:pointer;}
+  .cal-list-row.sel{outline:2px solid var(--teal);}
+  .cal-list-row .d{font-weight:700;font-size:14px;margin-bottom:6px;display:flex;justify-content:space-between;}
+  .cal-list-row .chips{display:flex;flex-wrap:wrap;gap:4px;}
+  .cal-list-row .cchip{font-size:12px;padding:3px 7px;margin:0;border-radius:6px;overflow:visible;}
+  @media(min-width:700px){ .cal-cell{min-height:118px;} .cchip{font-size:11.5px;padding:2px 5px;} .cal-cell .dn{font-size:13px;} }
   .assign-row{display:flex;align-items:center;gap:8px;margin-top:8px;}
   .assign-row select{flex:1;padding:8px;border-radius:8px;border:1px solid var(--paper-line);font-size:14px;font-family:var(--sans);background:#fff;}
   .warn-line{font-size:12px;color:var(--clay);margin-top:4px;line-height:1.4;}
@@ -341,9 +370,10 @@
   <h1>숙소 관리 수첩</h1>
   <div class="tabs">
     <button class="tab" data-tab="today">일정</button>
+    <button class="tab" data-tab="cal">달력</button>
     <button class="tab" data-tab="map">지도</button>
     <button class="tab" data-tab="all">숙소</button>
-    <button class="tab" data-tab="staff">직원</button>
+    <button class="tab" data-tab="staff">청소담당</button>
   </div>
 </div>
 
@@ -351,6 +381,9 @@
 <button class="fab" id="fab" style="display:none;">+</button>
 
 <script>
+// ===== 빌드 설정 (개인용: 서버 없이 이 폰에만 저장 / 회사용: 로그인 + 서버 공유) =====
+const CLOUD_ENABLED = false;
+const COMPANY_MODE = false;
 // ===== Firebase 연결 (로그인 + 실시간 공유 저장소) =====
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyB3KSGfToHr1oPxDJTk7sAYof7pKelfNGY",
@@ -364,10 +397,10 @@ const ADMIN_EMAILS = ['leeje@bnbcare.com'];
 const EMAIL_DOMAIN = '@bnbcare.com';
 const FB_VER = '10.14.1';
 let cloud = null; // { auth, db, user, fn }
-const isAdmin = () => !!(cloud && cloud.user && ADMIN_EMAILS.includes((cloud.user.email||'').toLowerCase()));
+const isAdmin = () => !CLOUD_ENABLED || !!(cloud && cloud.user && ADMIN_EMAILS.includes((cloud.user.email||'').toLowerCase()));
 
 // 공유되는 데이터(숙소, 직원, 날짜별 일정, 보고기록)만 서버에 저장. 나머지(시급, 출퇴근, 카카오키 등)는 이 폰에만 저장
-const isSharedKey = k => k==='properties:list' || k==='staff:list' || k==='report-log:list' || k.startsWith('today:');
+const isSharedKey = k => CLOUD_ENABLED && (k==='properties:list' || k==='staff:list' || k==='report-log:list' || k.startsWith('today:'));
 const localStore = {
   async get(key){ const raw = localStorage.getItem(key); return (raw===null||raw===undefined) ? null : { key, value: raw }; },
   async set(key, value){ localStorage.setItem(key, value); return { key, value }; },
@@ -454,6 +487,9 @@ let state = {
   companyLocation: null,
   hourlyWage: 0,
   staff: [],
+  calMonth: (()=>{ const d=new Date(); return { year:d.getFullYear(), month:d.getMonth() }; })(),
+  calView: 'grid',
+  monthRecords: {},
   photos: {}, // {propId:[{id,ts,by,thumb}]} 선택한 날짜 기준
   mapScope: 'today', // 'today' | 'all'
   mapReady: false,
@@ -506,7 +542,9 @@ function selectedWeekday(){
   const [y,m,d] = state.selectedDate.split('-').map(Number);
   return new Date(y,m-1,d).getDay();
 }
+function offLabel(st){ return st.onRequest ? '연락 시' : '불가'; }
 function staffUnavailable(st){
+  if(st.onRequest) return true; // 요일 미정: 연락 온 날만 배정
   const wd = selectedWeekday();
   const days = (st.days && st.days.length) ? st.days : [0,1,2,3,4,5,6];
   return !days.includes(wd);
@@ -514,12 +552,12 @@ function staffUnavailable(st){
 function warningsFor(st, p){
   const w = [];
   if(!st || !p) return w;
-  if(staffUnavailable(st)) w.push(`${DAY_NAMES[selectedWeekday()]}요일은 근무 불가`);
+  if(st.onRequest) w.push('연락 온 날만 배정 (요일 미정)');
+  else if(staffUnavailable(st)) w.push(`${DAY_NAMES[selectedWeekday()]}요일은 근무 불가`);
   (st.forbidden||[]).forEach(k=>{
     if(k && (p.name||'').includes(k)) w.push(`${st.name}님은 ${k} 배정 금지`);
   });
   if(st.endTime) w.push(`⏰ ${st.endTime} 이후 근무 불가`);
-  if(st.onRequest) w.push('가능할 때 먼저 연락오는 분');
   return w;
 }
 async function setAssign(propId, staffId){
@@ -546,7 +584,7 @@ function openAssignSheet(){
   const counts = {};
   r.propertyIds.forEach(id=>{ const sid=(r.assign||{})[id]; if(sid) counts[sid]=(counts[sid]||0)+1; });
   const unassigned = r.propertyIds.filter(id=>!(r.assign||{})[id]).length;
-  const summary = state.staff.map(st=>`<div style="font-size:13px;padding:2px 0;">${esc(st.name)} · ${counts[st.id]||0}곳${staffUnavailable(st)?' <span style="color:var(--clay)">(오늘 불가)</span>':''}</div>`).join('');
+  const summary = state.staff.map(st=>`<div style="font-size:13px;padding:2px 0;">${esc(st.name)} · ${counts[st.id]||0}곳${staffUnavailable(st)?' <span style="color:var(--clay)">(오늘 ${offLabel(st)})</span>':''}</div>`).join('');
   const root = document.createElement('div');
   root.className='overlay'; root.id='overlay';
   root.innerHTML = `
@@ -584,7 +622,7 @@ function openStaffEditSheet(st){
         </div></div>
       <div class="field"><label>근무 종료 제한 (예: 15:30, 없으면 비움)</label><input id="sf_end" value="${esc(cur.endTime||'')}"></div>
       <div class="field"><label>배정 금지 숙소 키워드 (쉼표로 구분)</label><input id="sf_forbid" value="${esc((cur.forbidden||[]).join(','))}"></div>
-      <label style="display:flex;align-items:center;gap:6px;font-size:14px;margin:6px 0;"><input type="checkbox" id="sf_req" ${cur.onRequest?'checked':''}>가능할 때 먼저 연락오는 분</label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:14px;margin:6px 0;"><input type="checkbox" id="sf_req" ${cur.onRequest?'checked':''}>요일 미정: 연락 온 날만 배정 (평소엔 불가로 처리)</label>
       <div class="sheet-actions">
         <button class="cancel-btn" id="sf_cancel">취소</button>
         <button class="save-btn" id="sf_save">저장</button>
@@ -646,7 +684,7 @@ function openNoticeSheet(){
     const tpls = getTemplates();
     const avail = state.staff.filter(st=>!staffUnavailable(st));
     const unavail = state.staff.filter(st=>staffUnavailable(st));
-    const row = st => `<div class="staff-item"><div style="flex:1;"><span class="sname">${esc(st.name)}</span>${staffUnavailable(st)?' <span style="color:var(--clay);font-size:11px;">오늘 불가</span>':''}</div>
+    const row = st => `<div class="staff-item"><div style="flex:1;"><span class="sname">${esc(st.name)}</span>${staffUnavailable(st)?' <span style="color:var(--clay);font-size:11px;">오늘 ${offLabel(st)}</span>':''}</div>
       ${st.phone?`<button data-nt-sms="${st.id}">문자</button>`:''}<button data-nt-share="${st.id}">카톡/복사</button></div>`;
     root.innerHTML = `
       <div class="sheet">
@@ -654,7 +692,7 @@ function openNoticeSheet(){
         ${tpls.length?`<div class="field"><label>저장한 문구</label><select id="nt_tpl"><option value="">불러오기…</option>${tpls.map((t,i)=>`<option value="${i}">${esc(t.slice(0,24))}</option>`).join('')}</select></div>`:''}
         <textarea id="nt_text" class="day-note" style="min-height:110px;" placeholder="보낼 공지 문구를 적어줘">${esc(root._text||'')}</textarea>
         <label style="display:flex;align-items:center;gap:6px;font-size:14px;margin:8px 0;"><input type="checkbox" id="nt_greet" ${root._greet===false?'':'checked'}>맨 앞에 "○○님, " 붙이기</label>
-        <div style="max-height:34vh;overflow-y:auto;">${avail.map(row).join('')}${unavail.length?`<div style="font-size:12px;color:var(--ink-soft);padding:8px 0 0;">이 날 근무 불가</div>`+unavail.map(row).join(''):''}</div>
+        <div style="max-height:34vh;overflow-y:auto;">${avail.map(row).join('')}${unavail.length?`<div style="font-size:12px;color:var(--ink-soft);padding:8px 0 0;">이 날 근무 불가 · 연락 대기</div>`+unavail.map(row).join(''):''}</div>
         <div class="sheet-actions" style="flex-wrap:wrap;">
           <button class="cancel-btn" id="nt_close">닫기</button>
           <button class="cancel-btn" id="nt_save">문구 저장</button>
@@ -747,7 +785,7 @@ function renderStaffTab(){
     return `<div class="prop-card open" style="margin-bottom:8px;">
       <div style="padding:12px;">
         <div style="display:flex;align-items:center;gap:8px;">
-          <div style="flex:1;"><div class="sname" style="font-weight:700;font-size:15px;">${esc(st.name)} ${staffUnavailable(st)?'<span style="color:var(--clay);font-size:11px;">오늘 불가</span>':''}</div>
+          <div style="flex:1;"><div class="sname" style="font-weight:700;font-size:15px;">${esc(st.name)} ${staffUnavailable(st)?'<span style="color:var(--clay);font-size:11px;">오늘 ${offLabel(st)}</span>':''}</div>
           <div style="font-size:12px;color:var(--ink-soft);">${dtxt}${st.endTime?' · ~'+esc(st.endTime):''}${(st.forbidden||[]).length?' · 금지:'+esc(st.forbidden.join(',')):''}${st.onRequest?' · 연락대기':''}</div></div>
           ${st.phone?`<a href="tel:${esc(st.phone)}" style="font-size:18px;text-decoration:none;">📞</a>`:''}
           <button class="pill-btn" data-staff-edit="${st.id}">수정</button>
@@ -759,7 +797,7 @@ function renderStaffTab(){
   return `
     <div class="summary"><div class="date">${renderDateLabel()}</div>
       <div style="font-size:12px;color:var(--ink-soft);">날짜는 일정 탭에서 바꿔 · 가능 ${avail.length}명 / 불가 ${unavail.length}명</div></div>
-    ${state.staff.length ? avail.map(card).join('') + (unavail.length?`<div style="font-size:12px;color:var(--ink-soft);margin:12px 0 6px;">이 날 근무 불가</div>`+unavail.map(card).join(''):'') : '<div class="empty">등록된 직원이 없어.<br>아래에서 추가하거나 JSON을 붙여넣어줘.</div>'}
+    ${state.staff.length ? avail.map(card).join('') + (unavail.length?`<div style="font-size:12px;color:var(--ink-soft);margin:12px 0 6px;">이 날 근무 불가 · 연락 대기</div>`+unavail.map(card).join(''):'') : '<div class="empty">등록된 직원이 없어.<br>아래에서 추가하거나 JSON을 붙여넣어줘.</div>'}
     <div style="display:flex;gap:8px;margin-top:12px;">
       <button class="pill-btn" id="noticeBtn">📢 공지 보내기</button>
       <button class="pill-btn" id="staffAddBtn">+ 직원 추가</button>
@@ -821,6 +859,7 @@ function pickPhotos(propId, btn){
   input.click();
 }
 function watchPhotos(){
+  if(!cloud) return;
   if(unsubs.photos){ unsubs.photos(); unsubs.photos = null; }
   state.photos = {};
   const q = cloud.fn.query(cloud.fn.collection(cloud.db,'kv'),
@@ -886,6 +925,126 @@ async function cleanupOldPhotos(){
   let n = 0;
   for(const dd of snap.docs){ await cloud.fn.deleteDoc(dd.ref); n++; }
   alert(n+'개 문서를 삭제했어.');
+}
+// ===== 달력 탭 (월간 한눈에 보기) =====
+const HOLIDAYS = {
+  '01-01':'신정','03-01':'삼일절','05-05':'어린이날','06-06':'현충일','08-15':'광복절','10-03':'개천절','10-09':'한글날','12-25':'성탄절',
+  '2026-02-16':'설날연휴','2026-02-17':'설날','2026-02-18':'설날연휴','2026-03-02':'대체공휴일','2026-05-24':'부처님오신날','2026-05-25':'대체공휴일',
+  '2026-06-03':'지방선거','2026-08-17':'대체공휴일','2026-09-24':'추석연휴','2026-09-25':'추석','2026-09-26':'추석연휴','2026-10-05':'대체공휴일'
+};
+function holidayName(ds){ return HOLIDAYS[ds] || HOLIDAYS[ds.slice(5)] || ''; }
+function ymd(y,m,d){ return y+'-'+pad2(m+1)+'-'+pad2(d); }
+function watchMonth(){
+  if(!cloud) return;
+  const { year, month } = state.calMonth;
+  const a = 'today:'+ymd(year,month,1), b = 'today:'+ymd(year,month,31);
+  if(unsubs.month){ unsubs.month(); unsubs.month = null; }
+  state.monthRecords = {};
+  const q = cloud.fn.query(cloud.fn.collection(cloud.db,'kv'),
+    cloud.fn.where(cloud.fn.documentId(),'>=',a), cloud.fn.where(cloud.fn.documentId(),'<=',b));
+  unsubs.month = cloud.fn.onSnapshot(q, snap=>{
+    const m = {};
+    snap.forEach(d=>{
+      try{
+        const rec = JSON.parse(d.data().value);
+        if(rec && rec.tasks){ m[(d.id||'').replace('today:','')] = rec; }
+      }catch(e){}
+    });
+    // 지금 보고 있는 날짜는 화면의 최신 상태를 우선
+    state.monthRecords = m;
+    if(state.tab === 'cal') safeRender();
+  }, ()=>{});
+}
+function readLocalMonth(){
+  const { year, month } = state.calMonth; const m = {};
+  for(let d=1; d<=31; d++){
+    const ds = ymd(year,month,d);
+    try{ const raw = localStorage.getItem('today:'+ds); if(raw){ const rec = JSON.parse(raw); if(rec && rec.tasks) m[ds] = rec; } }catch(e){}
+  }
+  return m;
+}
+function moveCalMonth(delta){
+  let { year, month } = state.calMonth;
+  month += delta;
+  while(month < 0){ month += 12; year--; }
+  while(month > 11){ month -= 12; year++; }
+  state.calMonth = { year, month };
+  watchMonth();
+  render();
+}
+function shortName(n){
+  return String(n||'').replace(/\s+/g,'')
+    .replace(/(엘지|LG|lg)(팰리스|펠리스|팰리|펠리)/,'엘지')
+    .replace(/동교로25길/,'동교25·').replace(/창천동잇다/,'창천').replace(/호$/,'');
+}
+function chipsFor(rec){
+  const pri = rec.priorityIds || [];
+  return rec.propertyIds.map(id=>{
+    const p = propById(id); if(!p) return null;
+    const tasks = (rec.tasks||{})[id] || [];
+    const done = tasks.length && tasks.every(t=>t.done);
+    return { id, name:p.name, pri: pri.includes(id), done, worker: (staffById((rec.assign||{})[id])||{}).name || '' };
+  }).filter(Boolean);
+}
+function renderCalendarTab(){
+  if(!cloud) state.monthRecords = readLocalMonth();
+  const { year, month } = state.calMonth;
+  const first = new Date(year, month, 1).getDay();
+  const days = new Date(year, month+1, 0).getDate();
+  const tStr = todayStr();
+  let total = 0;
+  Object.values(state.monthRecords).forEach(r=>{ total += (r.propertyIds||[]).length; });
+  const head = `
+    <div class="cal-head">
+      <button data-cal-nav="-1">◀</button>
+      <div class="ttl">${year}년 ${month+1}월</div>
+      <button data-cal-nav="1">▶</button>
+      <button data-cal-today="1">오늘</button>
+      <button data-cal-view="grid" class="${state.calView==='grid'?'on':''}">달력</button>
+      <button data-cal-view="list" class="${state.calView==='list'?'on':''}">목록</button>
+    </div>
+    <div style="font-size:12px;color:var(--ink-soft);margin:-4px 0 10px;">이 달 일정 ${Object.keys(state.monthRecords).length}일 · 총 ${total}건 · 날짜를 누르면 그날 일정으로 이동</div>`;
+  if(state.calView === 'list'){
+    const rows = [];
+    for(let d=1; d<=days; d++){
+      const ds = ymd(year,month,d);
+      const rec = state.monthRecords[ds];
+      if(!rec || !(rec.propertyIds||[]).length) continue;
+      const wd = new Date(year,month,d).getDay();
+      const cls = (wd===0 || holidayName(ds)) ? 'red' : (wd===6 ? 'blue' : '');
+      const chips = chipsFor(rec);
+      rows.push(`<div class="cal-list-row ${ds===state.selectedDate?'sel':''}" data-cal-day="${ds}">
+        <div class="d"><span class="${cls}">${month+1}/${d} (${DAY_NAMES[wd]}) ${holidayName(ds)?'· '+holidayName(ds):''}</span><span style="font-size:12px;color:var(--ink-soft);">${chips.length}건</span></div>
+        <div class="chips">${chips.map(c=>`<span class="cchip ${c.pri?'pri':''} ${c.done?'done':''}">${c.pri?'● ':''}${esc(c.name)}${c.worker?' · '+esc(c.worker):''}</span>`).join('')}</div></div>`);
+    }
+    return head + (rows.length ? rows.join('') : '<div class="empty">이 달에는 등록된 일정이 없어.</div>');
+  }
+  let cells = '';
+  ['일','월','화','수','목','금','토'].forEach((n,i)=>{ cells += `<div class="cal-dow ${i===0?'red':i===6?'blue':''}">${n}</div>`; });
+  const startDate = new Date(year, month, 1 - first);
+  const rowsNeeded = Math.ceil((first + days) / 7);
+  for(let i=0; i<rowsNeeded*7; i++){
+    const dt = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate() + i);
+    const ds = ymd(dt.getFullYear(), dt.getMonth(), dt.getDate());
+    const inMonth = dt.getMonth() === month;
+    const wd = dt.getDay();
+    const hol = holidayName(ds);
+    const rec = inMonth ? state.monthRecords[ds] : null;
+    const chips = rec ? chipsFor(rec) : [];
+    const cls = (wd===0 || hol) ? 'red' : (wd===6 ? 'blue' : '');
+    cells += `<div class="cal-cell ${inMonth?'':'out'} ${ds===tStr?'today':''} ${ds===state.selectedDate?'sel':''}" data-cal-day="${ds}">
+      <div class="dn"><b class="${cls}">${dt.getDate()}</b><span class="hol">${esc(hol)}</span>${chips.length?`<span class="cnt">${chips.length}</span>`:''}</div>
+      ${chips.map(c=>`<span class="cchip ${c.pri?'pri':''} ${c.done?'done':''}" title="${esc(c.name)}"><span class="sn">${esc(shortName(c.name))}</span><span class="fn">${esc(c.name)}</span></span>`).join('')}
+    </div>`;
+  }
+  return head + `<div class="mc-grid">${cells}</div>
+    <div style="font-size:11px;color:var(--ink-soft);margin-top:8px;"><span class="cchip pri" style="display:inline-block;">당일</span> 3시 체크인 당일 · <span class="cchip done" style="display:inline-block;">완료</span> 체크 완료</div>`;
+}
+function attachCalHandlers(){
+  document.querySelectorAll('[data-cal-nav]').forEach(b=> b.onclick = ()=> moveCalMonth(Number(b.dataset.calNav)));
+  document.querySelectorAll('[data-cal-today]').forEach(b=> b.onclick = ()=>{ const d = new Date(); state.calMonth = { year:d.getFullYear(), month:d.getMonth() }; watchMonth(); render(); });
+  document.querySelectorAll('[data-cal-view]').forEach(b=> b.onclick = ()=>{ state.calView = b.dataset.calView; try{ localStorage.setItem('pref:calView', state.calView); }catch(e){} render(); });
+  document.querySelectorAll('[data-cal-day]').forEach(el=> el.onclick = async ()=>{ state.tab = 'today'; await selectScheduleDate(el.dataset.calDay); window.scrollTo(0,0); });
 }
 async function loadKakaoKey(){
   try{
@@ -1297,6 +1456,7 @@ function render(){
   const view = document.getElementById('view');
   const fab = document.getElementById('fab');
   document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active', t.dataset.tab===state.tab));
+  document.getElementById('view').classList.toggle('wide', state.tab==='cal');
 
   if(state.tab === 'today'){
     fab.style.display='none';
@@ -1309,6 +1469,10 @@ function render(){
     fab.style.justifyContent='center';
     view.innerHTML = renderAll();
     attachHandlers();
+  } else if(state.tab === 'cal'){
+    fab.style.display='none';
+    view.innerHTML = renderCalendarTab();
+    attachCalHandlers();
   } else if(state.tab === 'staff'){
     fab.style.display='none';
     view.innerHTML = renderStaffTab();
@@ -1394,7 +1558,7 @@ function renderPickerBody(mode){
   const isTodaySelected = state.selectedDate === todayStr();
   return `
     ${renderScheduleCalendar()}
-    ${isEdit ? '' : (isTodaySelected ? renderClockCard() : renderClockReadOnly())}
+    ${(isEdit || COMPANY_MODE) ? '' : (isTodaySelected ? renderClockCard() : renderClockReadOnly())}
     <div class="picker-intro" style="margin-bottom:0;">${isEdit ? `➕ <b>${dateLabel} 업체 추가/제외</b> — 이미 체크한 세탁물·컨디션 진행 상황은 그대로 남아.` : `📋 <b>${dateLabel}</b> 일정을 만들어줘`}</div>
     <div class="paste-box">
       <label>일정·순서 메시지 붙여넣기 (선택)</label>
@@ -1448,14 +1612,14 @@ function renderScheduleCards(){
     const assignedSt = staffById((state.todayRecord.assign||{})[id]);
     const warns = warningsFor(assignedSt, p);
     const dayNote = (state.todayRecord.dayNotes||{})[id] || '';
-    const assignOpts = `<option value="">작업자 미배정</option>` + state.staff.map(st=>`<option value="${st.id}" ${assignedSt&&assignedSt.id===st.id?'selected':''}>${esc(st.name)}${staffUnavailable(st)?' (불가)':''}</option>`).join('');
+    const assignOpts = `<option value="">작업자 미배정</option>` + state.staff.map(st=>`<option value="${st.id}" ${assignedSt&&assignedSt.id===st.id?'selected':''}>${esc(st.name)}${staffUnavailable(st)?' ('+offLabel(st)+')':''}</option>`).join('');
     const taskRows = tasks.map((t,idx)=>`
       <div class="task-item ${t.done?'done':''}">
         <div class="task-item-main" data-task="${id}:${idx}">
           <div class="box">${t.done?'✓':''}</div>
           <div class="ttext">${esc(t.text)}</div>
         </div>
-        <button class="task-remove" data-remove-task="${id}:${idx}" title="이 업체에서 항목 빼기">✕</button>
+        ${isAdmin() ? `<button class="task-remove" data-remove-task="${id}:${idx}" title="이 업체에서 항목 빼기">✕</button>` : ''}
       </div>
     `).join('');
     const conditionTask = tasks.find(t=>t.text.includes('컨디션') || t.text.includes('사진'));
@@ -1519,13 +1683,13 @@ function renderScheduleCards(){
               ${(p.parkingId||p.parkingPw) ? `<span class="pw-value">${esc(p.parkingId)} / ${esc(p.parkingPw)}</span>` : ''}
             </div>
           </div>` : ''}
-          <div class="photo-strip">${(state.photos[id]||[]).map(t=>`<img class="pthumb" src="${t.thumb}" data-photo="${t.id}">`).join('')}</div>
+          ${CLOUD_ENABLED ? `<div class="photo-strip">${(state.photos[id]||[]).map(t=>`<img class="pthumb" src="${t.thumb}" data-photo="${t.id}">`).join('')}</div>
           <div class="job-row" style="margin-top:8px;">
             <button class="pill-btn" data-photo-add="${id}">📷 사진 추가</button>
-          </div>
+          </div>` : ''}
           <div class="section-divider"></div>
           <div class="task-list">${taskRows}</div>
-          ${missingRow}
+          ${isAdmin() ? missingRow : ''}
           ${conditionDone ? `
           <div class="job-row" style="margin-top:10px;">
             <button class="pill-btn" data-report="${id}" style="background:var(--teal-soft);color:var(--teal);">📨 완료 보고하기${(state.photos[id]||[]).length ? ' (사진 '+(state.photos[id]||[]).length+'장 포함)' : ''}</button>
@@ -1538,7 +1702,7 @@ function renderScheduleCards(){
   }).join('');
 
   return `
-    ${state.selectedDate === todayStr() ? renderClockCard() : renderClockReadOnly()}
+    ${COMPANY_MODE ? '' : (state.selectedDate === todayStr() ? renderClockCard() : renderClockReadOnly())}
     <div class="summary">
       <div class="date">${renderDateLabel()}</div>
       <div class="count-row">
@@ -1616,12 +1780,12 @@ function renderAll(){
         <div style="margin-top:8px;display:flex;flex-direction:column;gap:8px;">
           ${isAdmin() ? `<button class="pill-btn" id="bulkParkingBtn">🚗 여러 업체에 주차등록 정보 한번에 적용</button>
           <button class="pill-btn" id="cleanupAddressBtn">🧹 주소 띄어쓰기 한번에 정리</button>
-          <button class="pill-btn" id="cleanupPhotosBtn">🗑️ 30일 지난 사진 정리</button>
-          <button class="pill-btn" id="uploadLocalBtn">☁️ 이 폰의 데이터를 서버로 올리기</button>` : ''}
-          <button class="pill-btn" id="setHourlyWageBtn">💰 시급 ${state.hourlyWage ? state.hourlyWage.toLocaleString()+'원' : '설정하기'}</button>
+          ${CLOUD_ENABLED ? `<button class="pill-btn" id="cleanupPhotosBtn">🗑️ 30일 지난 사진 정리</button>
+          <button class="pill-btn" id="uploadLocalBtn">☁️ 이 폰의 데이터를 서버로 올리기</button>` : ''}` : ''}
+          ${COMPANY_MODE ? '' : `<button class="pill-btn" id="setHourlyWageBtn">💰 시급 ${state.hourlyWage ? state.hourlyWage.toLocaleString()+'원' : '설정하기'}</button>
           ${state.hourlyWage ? `<div style="font-size:12px;color:var(--ink-soft);padding:0 4px;">이번달 예상 급여: ${formatMinutes(computeThisMonthPay().totalMinutes)} · ${computeThisMonthPay().pay.toLocaleString()}원</div>` : ''}
-          <button class="pill-btn" id="exportWorkLogBtn">📤 출퇴근 기록 CSV로 내보내기</button>
-          <button class="pill-btn" id="logoutBtn">🚪 로그아웃 (${esc(cloud&&cloud.user?cloud.user.email:'')})</button>
+          <button class="pill-btn" id="exportWorkLogBtn">📤 출퇴근 기록 CSV로 내보내기</button>`}
+          ${CLOUD_ENABLED ? `<button class="pill-btn" id="logoutBtn">🚪 로그아웃 (${esc(cloud&&cloud.user?cloud.user.email:'')})</button>` : ''}
         </div>
       ` : ''}
     </div>
@@ -1735,8 +1899,7 @@ async function selectScheduleDate(dateKey){
   state.calPasteText = '';
   state.calPasteResultMsg = '';
   await loadTodayRecord();
-  watchToday();
-  if(cloud && cloud.user) watchPhotos();
+  if(cloud && cloud.user){ watchToday(); watchPhotos(); }
   render();
 }
 
@@ -2461,6 +2624,7 @@ document.addEventListener('focusout', ()=>{
   setTimeout(()=>{ if(!isTyping()){ pendingRender = false; render(); } }, 300);
 });
 function watchKey(name, key, onData){
+  if(!cloud) return;
   if(unsubs[name]){ unsubs[name](); unsubs[name]=null; }
   unsubs[name] = cloud.fn.onSnapshot(kvDoc(key), snap=>{
     if(snap.metadata.hasPendingWrites) return;
@@ -2492,6 +2656,7 @@ function watchShared(){
   });
   watchToday();
   watchPhotos();
+  watchMonth();
 }
 async function uploadLocalData(){
   if(!isAdmin()) return;
@@ -2549,7 +2714,21 @@ async function startApp(){
   appStarted = true;
   const lw = document.getElementById('loginWrap'); if(lw) lw.remove();
   document.body.classList.toggle('not-admin', !isAdmin());
+  document.body.classList.toggle('company', COMPANY_MODE);
+  if(COMPANY_MODE){
+    document.title = 'BNB CARE 업무';
+    const h1 = document.querySelector('.topbar h1'); if(h1) h1.textContent = 'BNB CARE 업무';
+    const tb = document.querySelector('.topbar'); if(tb && !document.getElementById('topUser') && cloud && cloud.user){
+      tb.style.position = 'relative';
+      const b = document.createElement('button'); b.id = 'topUser'; b.className = 'top-user';
+      b.textContent = (cloud.user.email||'').split('@')[0] + (isAdmin() ? ' · 관리자' : '');
+      b.onclick = async ()=>{ if(confirm('로그아웃할까?')){ await cloud.fn.signOut(cloud.auth); location.reload(); } };
+      tb.appendChild(b);
+    }
+    if(!isAdmin() && state.tab !== 'today' && state.tab !== 'cal') state.tab = 'today';
+  }
   state.selectedDate = todayStr();
+  try{ const v = localStorage.getItem('pref:calView'); if(v) state.calView = v; }catch(e){}
   await loadProperties();
   await loadStaff();
   await loadTodayRecord();
@@ -2561,14 +2740,15 @@ async function startApp(){
   await loadReportLog();
   await loadWorkLog();
   render();
-  watchShared();
+  if(cloud) watchShared();
   // 관리자 첫 로그인: 서버가 비어 있고 이 폰에 예전 데이터가 있으면 올릴지 물어봄
-  if(isAdmin() && state.properties.length === 0 && localStorage.getItem(KEY_PROPS)){
+  if(cloud && isAdmin() && state.properties.length === 0 && localStorage.getItem(KEY_PROPS)){
     if(confirm('서버에 숙소 데이터가 아직 없어. 이 폰에 저장된 데이터를 서버로 올릴까?')) await uploadLocalData();
   }
 }
 
 (async function init(){
+  if(!CLOUD_ENABLED){ startApp(); return; }
   document.getElementById('view').innerHTML = '<div class="empty">불러오는 중…</div>';
   try{
     await initCloud();
