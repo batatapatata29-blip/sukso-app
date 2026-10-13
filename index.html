@@ -173,6 +173,16 @@
   .cchip .fn{display:none;}
   @media(min-width:700px){ .cchip .fn{display:inline;} .cchip .sn{display:none;} }
   .red{color:#c0392b;} .blue{color:#2f5fb5;}
+  .wk-day{background:var(--surface);border:1px solid var(--paper-line);border-radius:10px;padding:12px 14px;margin-bottom:10px;cursor:pointer;}
+  .wk-day.today{outline:2px solid var(--teal);}
+  .wk-day .wd{display:flex;align-items:baseline;gap:8px;margin-bottom:8px;}
+  .wk-day .wd b{font-size:20px;}
+  .wk-day .wd .cn{margin-left:auto;font-size:13px;color:var(--ink-soft);}
+  .wk-chip{display:flex;align-items:center;gap:8px;font-size:16px;padding:9px 11px;margin:5px 0;border-radius:8px;background:var(--clay-soft,#f3d9d2);}
+  .wk-chip.done{background:var(--teal-soft,#dcebe7);}
+  .wk-chip .nm{flex:1;min-width:0;font-weight:600;}
+  .wk-chip .tag{font-size:12px;padding:2px 7px;border-radius:6px;background:rgba(0,0,0,.08);white-space:nowrap;}
+  .wk-empty{font-size:14px;color:var(--ink-soft);padding:4px 0;}
   .cal-list-row{background:var(--surface);border:1px solid var(--paper-line);border-radius:8px;padding:10px 12px;margin-bottom:8px;cursor:pointer;}
   .cal-list-row.sel{outline:2px solid var(--teal);}
   .cal-list-row .d{font-weight:700;font-size:14px;margin-bottom:6px;display:flex;justify-content:space-between;}
@@ -490,6 +500,7 @@ let state = {
   calMonth: (()=>{ const d=new Date(); return { year:d.getFullYear(), month:d.getMonth() }; })(),
   calView: 'grid',
   monthRecords: {},
+  calWeekStart: null,
   photos: {}, // {propId:[{id,ts,by,thumb}]} 선택한 날짜 기준
   mapScope: 'today', // 'today' | 'all'
   mapReady: false,
@@ -507,7 +518,7 @@ const DEFAULT_PROPERTIES = []; // 숙소 데이터는 서버(Firebase)에서 불
 async function loadProperties(){
   try{
     const res = await window.storage.get(KEY_PROPS, false);
-    if(res && res.value){ state.properties = JSON.parse(res.value); return; }
+    if(res && res.value){ state.properties = cleanProps(JSON.parse(res.value)); return; }
   }catch(e){}
   state.properties = DEFAULT_PROPERTIES;
 }
@@ -664,7 +675,39 @@ function staffAssignedProps(stId){
 // 전달 표시 (이 폰에만 저장)
 const sentKey = ()=> 'sent:'+state.selectedDate;
 function getSent(){ try{ return JSON.parse(localStorage.getItem(sentKey())||'{}'); }catch(e){ return {}; } }
-function markSent(stId){ const m = getSent(); m[stId] = Date.now(); try{ localStorage.setItem(sentKey(), JSON.stringify(m)); }catch(e){} }
+function staffSig(stId){
+  const r = state.todayRecord; if(!r) return '';
+  const ids = staffAssignedProps(stId).slice().sort();
+  return ids.map(id=> id+':'+(((r.dayNotes||{})[id])||'')).join('|');
+}
+function markSent(stId){ const m = getSent(); m[stId] = {t:Date.now(), sig:staffSig(stId)}; try{ localStorage.setItem(sentKey(), JSON.stringify(m)); }catch(e){} }
+// none / ok / changed
+function sentState(stId){
+  const v = getSent()[stId]; if(!v) return {s:'none'};
+  const t = (typeof v==='number')? v : v.t;
+  const sig = (typeof v==='number')? null : v.sig;
+  if(sig!==null && sig!==staffSig(stId)) return {s:'changed', t};
+  return {s:'ok', t};
+}
+function sentBadge(stId){
+  const x = sentState(stId);
+  if(x.s==='ok') return `<span style="font-size:12px;color:var(--teal);">✅ ${fmtClock(x.t)} 전달함</span>`;
+  if(x.s==='changed') return `<span style="font-size:12px;color:var(--clay);font-weight:700;">⚠️ 수정됨 · 다시 보내기</span>`;
+  return '';
+}
+function renderSendStrip(){
+  if(!isAdmin() || !state.staff.length || !state.todayRecord) return '';
+  const chips = state.staff.map(st=>{
+    const n = staffAssignedProps(st.id).length;
+    const x = sentState(st.id);
+    if(!n && x.s==='none') return '';
+    const mark = x.s==='ok' ? ' ✅' : (x.s==='changed' ? ' ⚠️' : '');
+    const border = x.s==='changed' ? 'border-color:var(--clay);color:var(--clay);' : (x.s==='ok' ? 'border-color:var(--teal);' : '');
+    return `<button class="pill-btn" data-staff-msg="${st.id}" style="${border}">${esc(st.name)} ${n}건 ✉️${mark}</button>`;
+  }).filter(Boolean).join('');
+  if(!chips) return '';
+  return `<div style="display:flex;flex-wrap:wrap;gap:6px;margin:0 0 12px;align-items:center;"><span style="font-size:12px;color:var(--ink-soft);">보내기</span>${chips}</div>`;
+}
 function fmtClock(ts){ const d = new Date(ts); return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
 function smsHref(phone, body){
   const ios = /iPhone|iPad|iPod/.test(navigator.userAgent);
@@ -713,34 +756,40 @@ function openNoticeSheet(){
   document.body.appendChild(root);
   draw();
 }
-function buildPersonalText(st, withPw){
+function buildPersonalText(st, withPw, withAddr, greet){
+  if(withAddr===undefined) withAddr = true;
   const r = state.todayRecord;
   const ids = staffAssignedProps(st.id);
-  const lines = [`[${renderDateLabel()}] ${st.name}님 배정 ${ids.length}곳`];
-  if(st.endTime) lines.push(`※ ${st.endTime} 이후 근무 불가`);
+  const NUM = ['①','②','③','④','⑤','⑥','⑦','⑧','⑨','⑩'];
+  const tm = (t)=> /^\d{1,2}$/.test(String(t).trim()) ? String(t).trim()+'시' : String(t).trim();
+  const bar = '━━━━━━━━━━━━';
+  const lines = [`${renderDateLabel()} ${st.name}님 일정 (${ids.length}곳)`];
   ids.forEach((id,i)=>{
     const p = propById(id); if(!p) return;
-    const pri = (r.priorityIds||[]).includes(id) ? ' ● 3시 체크인 당일(먼저)' : '';
     const note = (r.dayNotes||{})[id];
     lines.push('');
-    lines.push(`${i+1}. ${p.name}${pri}`);
-    lines.push(`   📍 ${p.address}`);
-    if(p.out || p.in) lines.push(`   OUT ${p.out||'-'} / IN ${p.in||'-'}`);
-    if(withPw && p.password) lines.push(`   🔑 ${p.password}`);
-    if(note) lines.push(`   📝 ${note}`);
+    if(i>0){ lines.push(bar); }
+    const pwTxt = /매번\s*(바뀜|바뀌|변경)/.test(p.password||'') ? '비번 추후 전달' : (p.password||'');
+    lines.push(`${i+1}. ${p.name}${(withPw && pwTxt) ? ' | '+pwTxt : ''}`);
+    if(withAddr && p.address) lines.push(`- ${p.address}`);
+    if(note) lines.push(`- ${note}`);
   });
+  if(greet){ lines.push(''); lines.push(greet); }
   return lines.join('\n');
 }
 function openPersonalSheet(stId){
   const st = staffById(stId); if(!st) return;
-  let withPw = false;
-  try{ withPw = localStorage.getItem('pref:msgPw')==='1'; }catch(e){}
+  let withPw = true, withAddr = true, withGreet = true, greetTxt = '잘 부탁드립니다 :)';
+  try{ withPw = localStorage.getItem('pref:msgPw')!=='0'; withAddr = localStorage.getItem('pref:msgAddr')!=='0'; withGreet = localStorage.getItem('pref:msgGreetOn')!=='0'; const g = localStorage.getItem('pref:msgGreet'); if(g!==null) greetTxt = g; }catch(e){}
   const root = document.createElement('div');
   root.className='overlay'; root.id='overlay';
   root.innerHTML = `
     <div class="sheet">
       <h2>✉️ ${esc(st.name)}님께 보내기</h2>
       <label style="display:flex;align-items:center;gap:6px;font-size:14px;margin-bottom:8px;"><input type="checkbox" id="pm_pw" ${withPw?'checked':''}>도어락 비밀번호 포함</label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:14px;margin-bottom:8px;"><input type="checkbox" id="pm_addr" ${withAddr?'checked':''}>주소 포함</label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:14px;margin-bottom:8px;"><input type="checkbox" id="pm_greet_on" ${withGreet?'checked':''}>끝인사 포함</label>
+      <input id="pm_greet" type="text" value="${esc(greetTxt)}" style="width:100%;margin-bottom:8px;padding:8px;border:1px solid var(--line,#ddd);border-radius:8px;font-size:14px;box-sizing:border-box;">
       <textarea id="pm_text" class="day-note" style="min-height:220px;"></textarea>
       <div class="sheet-actions" style="flex-wrap:wrap;">
         <button class="cancel-btn" id="pm_close">닫기</button>
@@ -750,9 +799,12 @@ function openPersonalSheet(stId){
     </div>`;
   document.body.appendChild(root);
   const ta = document.getElementById('pm_text');
-  const refresh = ()=>{ ta.value = buildPersonalText(st, document.getElementById('pm_pw').checked); };
+  const refresh = ()=>{ ta.value = buildPersonalText(st, document.getElementById('pm_pw').checked, document.getElementById('pm_addr').checked, document.getElementById('pm_greet_on').checked ? document.getElementById('pm_greet').value.trim() : ''); };
   refresh();
   document.getElementById('pm_pw').onchange = (e)=>{ try{ localStorage.setItem('pref:msgPw', e.target.checked?'1':'0'); }catch(_){} refresh(); };
+  document.getElementById('pm_addr').onchange = (e)=>{ try{ localStorage.setItem('pref:msgAddr', e.target.checked?'1':'0'); }catch(_){} refresh(); };
+  document.getElementById('pm_greet_on').onchange = (e)=>{ try{ localStorage.setItem('pref:msgGreetOn', e.target.checked?'1':'0'); }catch(_){} refresh(); };
+  document.getElementById('pm_greet').oninput = (e)=>{ try{ localStorage.setItem('pref:msgGreet', e.target.value); }catch(_){} refresh(); };
   document.getElementById('pm_close').onclick = ()=> root.remove();
   const sms = document.getElementById('pm_sms');
   if(sms) sms.onclick = ()=>{ markSent(st.id); render(); location.href = smsHref(st.phone, ta.value); };
@@ -791,12 +843,12 @@ function renderStaffTab(){
           <button class="pill-btn" data-staff-edit="${st.id}">수정</button>
         </div>
         <div style="font-size:13px;margin-top:8px;">${props.length?`배정 ${props.length}곳: `+props.map(p=>esc(p.name)).join(', '):'<span style="color:var(--ink-soft);">배정 없음</span>'}</div>
-        ${props.length?`<button class="pill-btn" data-staff-msg="${st.id}" style="margin-top:8px;">✉️ ${esc(st.name)}님께 보내기</button>${getSent()[st.id]?` <span style="font-size:12px;color:var(--teal);">✅ ${fmtClock(getSent()[st.id])} 전달함</span>`:''}`:''}
+        ${props.length?`<button class="pill-btn" data-staff-msg="${st.id}" style="margin-top:8px;">✉️ ${esc(st.name)}님께 보내기</button>${' '+sentBadge(st.id)}`:''}
       </div></div>`;
   };
   return `
     <div class="summary"><div class="date">${renderDateLabel()}</div>
-      <div style="font-size:12px;color:var(--ink-soft);">날짜는 일정 탭에서 바꿔 · 가능 ${avail.length}명 / 불가 ${unavail.length}명</div></div>
+      <div style="font-size:12px;color:var(--ink-soft);">날짜는 ${COMPANY_MODE?'일정·오늘':'일정'} 탭에서 바꿔 · 가능 ${avail.length}명 / 불가 ${unavail.length}명</div></div>
     ${state.staff.length ? avail.map(card).join('') + (unavail.length?`<div style="font-size:12px;color:var(--ink-soft);margin:12px 0 6px;">이 날 근무 불가 · 연락 대기</div>`+unavail.map(card).join(''):'') : '<div class="empty">등록된 직원이 없어.<br>아래에서 추가하거나 JSON을 붙여넣어줘.</div>'}
     <div style="display:flex;gap:8px;margin-top:12px;">
       <button class="pill-btn" id="noticeBtn">📢 공지 보내기</button>
@@ -937,7 +989,8 @@ function ymd(y,m,d){ return y+'-'+pad2(m+1)+'-'+pad2(d); }
 function watchMonth(){
   if(!cloud) return;
   const { year, month } = state.calMonth;
-  const a = 'today:'+ymd(year,month,1), b = 'today:'+ymd(year,month,31);
+  const dkey = dt => ymd(dt.getFullYear(), dt.getMonth(), dt.getDate());
+  const a = 'today:'+dkey(new Date(year, month, 1-7)), b = 'today:'+dkey(new Date(year, month+1, 7));
   if(unsubs.month){ unsubs.month(); unsubs.month = null; }
   state.monthRecords = {};
   const q = cloud.fn.query(cloud.fn.collection(cloud.db,'kv'),
@@ -957,8 +1010,8 @@ function watchMonth(){
 }
 function readLocalMonth(){
   const { year, month } = state.calMonth; const m = {};
-  for(let d=1; d<=31; d++){
-    const ds = ymd(year,month,d);
+  for(let d=-6; d<=38; d++){
+    const dt = new Date(year, month, d); const ds = ymd(dt.getFullYear(), dt.getMonth(), dt.getDate());
     try{ const raw = localStorage.getItem('today:'+ds); if(raw){ const rec = JSON.parse(raw); if(rec && rec.tasks) m[ds] = rec; } }catch(e){}
   }
   return m;
@@ -986,14 +1039,60 @@ function chipsFor(rec){
     return { id, name:p.name, pri: pri.includes(id), done, worker: (staffById((rec.assign||{})[id])||{}).name || '' };
   }).filter(Boolean);
 }
+function weekStartOf(ds){
+  const [y,m,d] = ds.split('-').map(Number); const dt = new Date(y, m-1, d);
+  dt.setDate(dt.getDate() - dt.getDay());
+  return ymd(dt.getFullYear(), dt.getMonth(), dt.getDate());
+}
+function shiftWeek(delta){
+  const [y,m,d] = (state.calWeekStart || weekStartOf(todayStr())).split('-').map(Number);
+  const dt = new Date(y, m-1, d + delta*7);
+  state.calWeekStart = ymd(dt.getFullYear(), dt.getMonth(), dt.getDate());
+  const mid = new Date(dt.getFullYear(), dt.getMonth(), dt.getDate()+3);
+  if(mid.getFullYear()!==state.calMonth.year || mid.getMonth()!==state.calMonth.month){
+    state.calMonth = { year:mid.getFullYear(), month:mid.getMonth() }; watchMonth();
+  }
+  render();
+}
+function renderWeekView(){
+  if(!state.calWeekStart) state.calWeekStart = weekStartOf(state.selectedDate || todayStr());
+  const [y,m,d] = state.calWeekStart.split('-').map(Number);
+  const tStr = todayStr();
+  const days = []; for(let i=0;i<7;i++){ const dt = new Date(y, m-1, d+i); days.push({ dt, ds: ymd(dt.getFullYear(), dt.getMonth(), dt.getDate()) }); }
+  const a = days[0].dt, b = days[6].dt;
+  const head = `<div class="cal-head">
+      <button data-cal-wk="-1">◀</button>
+      <div class="ttl">${a.getMonth()+1}/${a.getDate()} ~ ${b.getMonth()+1}/${b.getDate()}</div>
+      <button data-cal-wk="1">▶</button>
+      <button data-cal-wk="today">이번 주</button>
+      <button data-cal-view="grid">달력</button>
+      <button data-cal-view="week" class="on">주간</button>
+      <button data-cal-view="list">목록</button>
+      ${isAdmin()?'<button data-cal-import="1">📥 가져오기</button>':''}
+    </div>`;
+  const body = days.map(({dt,ds})=>{
+    const rec = state.monthRecords[ds];
+    const chips = rec ? chipsFor(rec) : [];
+    const wd = dt.getDay(); const hol = holidayName(ds);
+    const cls = (wd===0 || hol) ? 'red' : (wd===6 ? 'blue' : '');
+    return `<div class="wk-day ${ds===tStr?'today':''}" data-cal-day="${ds}">
+      <div class="wd"><b class="${cls}">${dt.getMonth()+1}/${dt.getDate()} (${DAY_NAMES[wd]})</b>${hol?`<span class="hol" style="font-size:12px;color:var(--clay);">${esc(hol)}</span>`:''}<span class="cn">${chips.length?chips.length+'건':''}</span></div>
+      ${chips.length ? chips.map(c=>`<div class="wk-chip ${c.done?'done':''}"><span class="nm">${esc(c.name)}</span>${c.pri?'<span class="tag" style="background:var(--clay);color:#fff;">당일</span>':''}${c.worker?`<span class="tag">${esc(c.worker)}</span>`:''}${c.done?'<span class="tag">✓ 완료</span>':''}</div>`).join('') : '<div class="wk-empty">일정 없음</div>'}
+    </div>`;
+  }).join('');
+  return head + body;
+}
 function renderCalendarTab(){
   if(!cloud) state.monthRecords = readLocalMonth();
+  if(state.calView === 'week') return renderWeekView();
   const { year, month } = state.calMonth;
   const first = new Date(year, month, 1).getDay();
   const days = new Date(year, month+1, 0).getDate();
   const tStr = todayStr();
   let total = 0;
-  Object.values(state.monthRecords).forEach(r=>{ total += (r.propertyIds||[]).length; });
+  const mPrefix = year+'-'+pad2(month+1)+'-';
+  const mKeys = Object.keys(state.monthRecords).filter(k=>k.startsWith(mPrefix));
+  mKeys.forEach(k=>{ total += (state.monthRecords[k].propertyIds||[]).length; });
   const head = `
     <div class="cal-head">
       <button data-cal-nav="-1">◀</button>
@@ -1001,9 +1100,11 @@ function renderCalendarTab(){
       <button data-cal-nav="1">▶</button>
       <button data-cal-today="1">오늘</button>
       <button data-cal-view="grid" class="${state.calView==='grid'?'on':''}">달력</button>
+      <button data-cal-view="week" class="${state.calView==='week'?'on':''}">주간</button>
       <button data-cal-view="list" class="${state.calView==='list'?'on':''}">목록</button>
+      ${isAdmin()?'<button data-cal-import="1">📥 가져오기</button>':''}
     </div>
-    <div style="font-size:12px;color:var(--ink-soft);margin:-4px 0 10px;">이 달 일정 ${Object.keys(state.monthRecords).length}일 · 총 ${total}건 · 날짜를 누르면 그날 일정으로 이동</div>`;
+    <div style="font-size:12px;color:var(--ink-soft);margin:-4px 0 10px;">이 달 일정 ${mKeys.length}일 · 총 ${total}건 · 날짜를 누르면 그날 일정으로 이동</div>`;
   if(state.calView === 'list'){
     const rows = [];
     for(let d=1; d<=days; d++){
@@ -1045,6 +1146,205 @@ function attachCalHandlers(){
   document.querySelectorAll('[data-cal-today]').forEach(b=> b.onclick = ()=>{ const d = new Date(); state.calMonth = { year:d.getFullYear(), month:d.getMonth() }; watchMonth(); render(); });
   document.querySelectorAll('[data-cal-view]').forEach(b=> b.onclick = ()=>{ state.calView = b.dataset.calView; try{ localStorage.setItem('pref:calView', state.calView); }catch(e){} render(); });
   document.querySelectorAll('[data-cal-day]').forEach(el=> el.onclick = async ()=>{ state.tab = 'today'; await selectScheduleDate(el.dataset.calDay); window.scrollTo(0,0); });
+  document.querySelectorAll('[data-cal-import]').forEach(b=> b.onclick = openImportSheet);
+  document.querySelectorAll('[data-cal-wk]').forEach(b=> b.onclick = ()=>{
+    const v = b.dataset.calWk;
+    if(v==='today'){ state.calWeekStart = weekStartOf(todayStr()); const d=new Date(); if(d.getMonth()!==state.calMonth.month||d.getFullYear()!==state.calMonth.year){ state.calMonth={year:d.getFullYear(),month:d.getMonth()}; watchMonth(); } render(); }
+    else shiftWeek(Number(v));
+  });
+}
+
+
+async function moveProperty(id){
+  const p = propById(id); const rec = state.todayRecord;
+  if(!p || !rec) return;
+  const v = prompt(p.name+' 일정을 어느 날짜로 옮길까? (예: 10/15)');
+  if(!v) return;
+  const m = v.match(/(\d{1,2})\s*[\/\-.월]\s*(\d{1,2})/);
+  if(!m){ alert('날짜를 "10/15" 형식으로 입력해줘.'); return; }
+  const yy = Number(state.selectedDate.slice(0,4));
+  const ds = yy+'-'+pad2(Number(m[1]))+'-'+pad2(Number(m[2]));
+  if(ds === state.selectedDate){ alert('같은 날짜야.'); return; }
+  let tgt = null;
+  try{ const x = await window.storage.get('today:'+ds, false); if(x && x.value) tgt = JSON.parse(x.value); }catch(e){}
+  if(!tgt) tgt = { propertyIds:[], tasks:{}, priorityIds:[], excludedIds:[] };
+  tgt.propertyIds = tgt.propertyIds||[]; tgt.tasks = tgt.tasks||{}; tgt.priorityIds = tgt.priorityIds||[]; tgt.excludedIds = tgt.excludedIds||[];
+  if(tgt.propertyIds.includes(id)){ alert('그 날짜에 이미 있어.'); return; }
+  if(!confirm(p.name+' 일정을 '+Number(m[1])+'/'+Number(m[2])+'로 옮길까?')) return;
+  tgt.propertyIds.push(id);
+  tgt.tasks[id] = (rec.tasks||{})[id] || tasksForProperty(p).map(text=>({text, done:false}));
+  if((rec.priorityIds||[]).includes(id) && !tgt.priorityIds.includes(id)) tgt.priorityIds.push(id);
+  if((rec.assign||{})[id]){ tgt.assign = tgt.assign||{}; tgt.assign[id] = rec.assign[id]; }
+  if((rec.dayNotes||{})[id]){ tgt.dayNotes = tgt.dayNotes||{}; tgt.dayNotes[id] = rec.dayNotes[id]; }
+  try{ await window.storage.set('today:'+ds, JSON.stringify(tgt), false); }catch(e){ alert('저장에 실패했어.'); return; }
+  // 저장 직후 실시간 반영으로 state.todayRecord가 새 객체로 바뀔 수 있어서 다시 가져옴
+  const cur = state.todayRecord || rec;
+  cur.propertyIds = (cur.propertyIds||[]).filter(x=>x!==id);
+  if(cur.tasks) delete cur.tasks[id];
+  cur.priorityIds = (cur.priorityIds||[]).filter(x=>x!==id);
+  if(cur.assign) delete cur.assign[id];
+  if(cur.dayNotes) delete cur.dayNotes[id];
+  state.todayRecord = cur;
+  await saveTodayRecord();
+  render();
+}
+function parseScheduleText(text, defYear){
+  const out = {};
+  String(text||'').split(/\r?\n/).forEach(line=>{
+    const m = line.match(/^\s*(?:(\d{4})[-\/.])?(\d{1,2})\s*[\/\-.월]\s*(\d{1,2})\s*일?\s*(?:\([^)]*\))?\s*[:：]?\s*(.*)$/);
+    if(!m) return;
+    const y = m[1] ? Number(m[1]) : defYear;
+    const ds = y+'-'+pad2(Number(m[2]))+'-'+pad2(Number(m[3]));
+    m[4].split(/[,，]/).map(x=>x.trim()).filter(Boolean).forEach(it=>{
+      const parts = it.split('|');
+      (out[ds] = out[ds] || []).push({ raw: parts[0].trim(), note: parts.slice(1).join('|').trim() });
+    });
+  });
+  return out;
+}
+
+function parseKakaoSchedule(text, defYear){
+  const out = []; const seen = new Set();
+  const nowM = new Date().getMonth()+1;
+  String(text||'').split(/\r?\n/).forEach(line=>{
+    const m = line.match(/(\d{1,2})\s*월\s*(\d{1,2})\s*일\s*(?:\([^)]*\))?\s*(.*)$/);
+    if(!m) return;
+    const mo = Number(m[1]), d = Number(m[2]); let yy = defYear;
+    if(mo < nowM - 6) yy = defYear + 1;
+    const ds = yy+'-'+pad2(mo)+'-'+pad2(d);
+    if(seen.has(ds)) return; seen.add(ds);
+    const rest = m[3] || '';
+    const g = rest.match(/(\d{1,2})\s*[~∼～\-]\s*(\d{1,2})/);
+    const n = rest.match(/(\d+)\s*명/);
+    out.push({ ds, gap: g ? g[1]+'~'+g[2] : '', guests: n ? Number(n[1]) : 0, today: /[■□◼◻▪]|당일/.test(rest) });
+  });
+  return out;
+}
+function openImportSheet(){
+  const old = document.getElementById('overlayImp'); if(old) old.remove();
+  const root = document.createElement('div');
+  root.className = 'overlay'; root.id = 'overlayImp';
+  const y = state.calMonth ? state.calMonth.year : new Date().getFullYear();
+  const stepInput = ()=>{
+    root.innerHTML = `<div class="sheet">
+      <h2>📥 일정 가져오기</h2>
+      <button class="save-btn" id="imp_kakao" style="width:100%;margin-bottom:10px;">💬 카톡 일정표 붙여넣기 (숙소 1곳)</button>
+      <div style="font-size:12px;color:var(--ink-soft);margin-bottom:4px;">또는 아래에 날짜별 목록을 붙여넣기</div>
+      <div style="font-size:12px;color:var(--ink-soft);margin-bottom:8px;">한 줄에 한 날짜씩 붙여넣어줘. 예) 10/3: 홍대102호, 창천동잇다303호<br>이미 등록된 일정은 지워지지 않고, 없는 숙소만 추가돼.</div>
+      <textarea id="imp_text" style="width:100%;height:220px;font-size:13px;" placeholder="10/2: 동교스테이C, 엘지팰리스1208호&#10;10/3: 홍대102호, 서교동복층"></textarea>
+      <div class="sheet-actions"><button class="cancel-btn" id="imp_cancel">취소</button><button class="save-btn" id="imp_next">다음 (미리보기)</button></div></div>`;
+    document.getElementById('imp_cancel').onclick = ()=> root.remove();
+    document.getElementById('imp_kakao').onclick = stepKakao;
+    document.getElementById('imp_next').onclick = ()=>{
+      const data = parseScheduleText(document.getElementById('imp_text').value, y);
+      if(!Object.keys(data).length){ alert('날짜 형식(예: 10/3: 숙소, 숙소)으로 된 줄이 없어.'); return; }
+      stepMap(data);
+    };
+  };
+
+  const stepKakao = ()=>{
+    const props = state.properties.slice().sort((a,b)=>a.name.localeCompare(b.name,'ko'));
+    root.innerHTML = `<div class="sheet" style="max-height:88vh;overflow:auto;">
+      <h2>💬 카톡 일정표</h2>
+      <div style="font-size:12px;color:var(--ink-soft);margin-bottom:8px;">카톡방(숙소)을 고르고, 담당자가 보낸 일정표 문자를 그대로 붙여넣어줘.<br>날짜 줄만 읽고, 주소·비밀번호 같은 내용은 읽지도 저장하지도 않아.</div>
+      <div class="field"><label>숙소 (카톡방 이름)</label><select id="kk_prop"><option value="">숙소 선택</option>${props.map(pp=>`<option value="${esc(pp.id)}">${esc(pp.name)}</option>`).join('')}</select></div>
+      <textarea id="kk_text" style="width:100%;height:200px;font-size:13px;" placeholder="- 10월 5일(월) 29~5, 4명 체크인 ■당일&#10;- 10월 7일(수) 5~7, 3명 체크인"></textarea>
+      <div class="sheet-actions"><button class="cancel-btn" id="kk_back">뒤로</button><button class="save-btn" id="kk_next">다음 (미리보기)</button></div></div>`;
+    document.getElementById('kk_back').onclick = stepInput;
+    document.getElementById('kk_next').onclick = ()=>{
+      const pid = document.getElementById('kk_prop').value;
+      if(!pid){ alert('숙소를 먼저 골라줘.'); return; }
+      const rows = parseKakaoSchedule(document.getElementById('kk_text').value, y);
+      if(!rows.length){ alert('"10월 5일(월) ..." 형식의 날짜 줄을 못 찾았어.'); return; }
+      stepKakaoPreview(pid, rows);
+    };
+  };
+  const stepKakaoPreview = async (pid, rows)=>{
+    const pr = propById(pid);
+    const exists = {};
+    for(const r of rows){ try{ const x = await window.storage.get('today:'+r.ds, false); if(x && x.value){ const rec = JSON.parse(x.value); exists[r.ds] = (rec.propertyIds||[]).includes(pid); } }catch(e){} }
+    root.innerHTML = `<div class="sheet" style="max-height:88vh;overflow:auto;">
+      <h2>${esc(pr.name)} 일정 확인</h2>
+      <div style="font-size:12px;color:var(--ink-soft);margin-bottom:8px;">체크한 날짜만 등록돼. 이미 등록된 날짜는 건너뛰어.</div>
+      ${rows.map((r,i)=>`<label style="display:flex;gap:8px;align-items:flex-start;margin:6px 0;font-size:13px;">
+        <input type="checkbox" data-kk-row="${i}" ${exists[r.ds]?'disabled':'checked'} style="margin-top:3px;">
+        <span><b>${Number(r.ds.slice(5,7))}/${Number(r.ds.slice(8))}</b>${r.guests?` · ${r.guests}명 체크인`:''}${r.gap?` · 비는 기간 ${esc(r.gap)}`:''}${r.today?' · <b style="color:var(--clay)">당일</b>':''}${exists[r.ds]?' · <span style="color:var(--ink-soft)">이미 있음</span>':''}</span></label>`).join('')}
+      <div class="sheet-actions"><button class="cancel-btn" id="kp_back">뒤로</button><button class="save-btn" id="kp_go">등록</button></div></div>`;
+    document.getElementById('kp_back').onclick = stepKakao;
+    document.getElementById('kp_go').onclick = async ()=>{
+      const btn = document.getElementById('kp_go'); btn.disabled = true; btn.textContent = '저장 중…';
+      let added = 0, failed = 0;
+      for(const el of root.querySelectorAll('[data-kk-row]')){
+        if(!el.checked) continue;
+        const r = rows[Number(el.dataset.kkRow)];
+        let rec = null;
+        try{ const x = await window.storage.get('today:'+r.ds, false); if(x && x.value) rec = JSON.parse(x.value); }catch(e){}
+        if(!rec) rec = { propertyIds:[], tasks:{}, priorityIds:[], excludedIds:[] };
+        rec.propertyIds = rec.propertyIds||[]; rec.tasks = rec.tasks||{}; rec.priorityIds = rec.priorityIds||[]; rec.excludedIds = rec.excludedIds||[];
+        if(rec.propertyIds.includes(pid)) continue;
+        rec.propertyIds.push(pid);
+        rec.tasks[pid] = tasksForProperty(pr).map(text=>({text, done:false}));
+        if((r.today || pr.alwaysPriority) && !rec.priorityIds.includes(pid)) rec.priorityIds.push(pid);
+        rec.excludedIds = rec.excludedIds.filter(x=>x.id!==pid);
+        const note = [r.guests?`${r.guests}명 체크인`:'', r.gap?`비는 기간 ${r.gap}`:''].filter(Boolean).join(' · ');
+        if(note){ rec.dayNotes = rec.dayNotes||{}; if(!rec.dayNotes[pid]) rec.dayNotes[pid] = note; }
+        try{ await window.storage.set('today:'+r.ds, JSON.stringify(rec), false); added++; }catch(err){ failed++; }
+      }
+      root.remove();
+      if(state.selectedDate) await loadTodayRecord();
+      render();
+      alert(`${pr.name} ${added}일 등록했어.${failed?`\n저장 실패 ${failed}일`:''}`);
+    };
+  };
+  const stepMap = (data)=>{
+    const names = []; Object.values(data).forEach(arr=>arr.forEach(e=>{ if(!names.includes(e.raw)) names.push(e.raw); }));
+    const props = state.properties.slice().sort((a,b)=>a.name.localeCompare(b.name,'ko'));
+    const guess = {}; names.forEach(n=>{ const m = findBestPropertyMatch(n); guess[n] = m ? m.id : ''; });
+    const unmatched = names.filter(n=>!guess[n]);
+    const total = Object.values(data).reduce((a,b)=>a+b.length,0);
+    root.innerHTML = `<div class="sheet" style="max-height:88vh;overflow:auto;">
+      <h2>이름 확인</h2>
+      <div style="font-size:12px;color:var(--ink-soft);margin-bottom:8px;">${Object.keys(data).length}일 · ${total}건 · 숙소 이름 ${names.length}종류${unmatched.length?` · <b style="color:var(--clay)">못 찾은 ${unmatched.length}개</b>`:' · 모두 찾았어'}<br>못 찾은 이름은 숙소를 골라줘. <span style="color:#c27a00">추정</span>은 비슷한 이름으로 맞춘 거라 확인해줘. 건너뛰면 등록하지 않아.</div>
+      ${names.map((n,i)=>`<div style="display:flex;gap:6px;align-items:center;margin:4px 0;font-size:13px;">
+        <div style="flex:0 0 42%;${guess[n]?'':'color:var(--clay);font-weight:700;'}">${esc(n)}${(guess[n] && normalizeForMatch((propById(guess[n])||{}).name)!==normalizeForMatch(n))?' <span style="color:#c27a00;font-size:11px;">추정</span>':''}</div>
+        <select data-imp-map="${i}" style="flex:1;min-width:0;"><option value="">건너뛰기</option>${props.map(pp=>`<option value="${esc(pp.id)}" ${guess[n]===pp.id?'selected':''}>${esc(pp.name)}</option>`).join('')}</select></div>`).join('')}
+      <div class="sheet-actions"><button class="cancel-btn" id="imp_back">뒤로</button><button class="save-btn" id="imp_go">가져오기</button></div></div>`;
+    document.getElementById('imp_back').onclick = stepInput;
+    document.getElementById('imp_go').onclick = async ()=>{
+      const map = {}; root.querySelectorAll('[data-imp-map]').forEach(sel=>{ map[names[Number(sel.dataset.impMap)]] = sel.value; });
+      const btn = document.getElementById('imp_go'); btn.disabled = true; btn.textContent = '저장 중…';
+      let added = 0, exist = 0, skipped = 0, days = 0, failed = 0;
+      for(const ds of Object.keys(data).sort()){
+        let rec = null;
+        try{ const r = await window.storage.get('today:'+ds, false); if(r && r.value) rec = JSON.parse(r.value); }catch(e){}
+        let changed = false;
+        if(!rec){ rec = { propertyIds:[], tasks:{}, priorityIds:[], excludedIds:[] }; }
+        rec.propertyIds = rec.propertyIds || []; rec.tasks = rec.tasks || {}; rec.priorityIds = rec.priorityIds || []; rec.excludedIds = rec.excludedIds || [];
+        data[ds].forEach(e=>{
+          const id = map[e.raw];
+          if(!id){ skipped++; return; }
+          if(rec.propertyIds.includes(id)){ exist++; return; }
+          const pr = propById(id);
+          rec.propertyIds.push(id);
+          rec.tasks[id] = tasksForProperty(pr).map(text=>({text, done:false}));
+          if(pr && pr.alwaysPriority && !rec.priorityIds.includes(id)) rec.priorityIds.push(id);
+          rec.excludedIds = rec.excludedIds.filter(x=>x.id!==id);
+          if(e.note){ rec.dayNotes = rec.dayNotes || {}; rec.dayNotes[id] = e.note; }
+          added++; changed = true;
+        });
+        if(changed){
+          try{ await window.storage.set('today:'+ds, JSON.stringify(rec), false); days++; }catch(err){ failed++; }
+        }
+      }
+      root.remove();
+      if(state.selectedDate) await loadTodayRecord();
+      render();
+      alert(`가져오기 끝!\n새로 추가 ${added}건 (${days}일)\n이미 있어서 건너뜀 ${exist}건\n이름 못 찾아 건너뜀 ${skipped}건${failed?`\n저장 실패 ${failed}일`:''}`);
+    };
+  };
+  document.body.appendChild(root);
+  if(!state.properties.length){ alert('숙소 데이터가 아직 없어.'); root.remove(); return; }
+  stepInput();
 }
 async function loadKakaoKey(){
   try{
@@ -1086,6 +1386,8 @@ async function saveCompanyLocation(){
     }
   }catch(e){}
 }
+function cleanAddr(a){ return typeof a==='string' ? a.replace(/\[([^\]]*)\]\([^)]*\)/g,'$1').trim() : a; }
+function cleanProps(list){ return Array.isArray(list) ? list.map(p=> (p && typeof p.address==='string' && p.address.includes('](')) ? Object.assign({}, p, {address: cleanAddr(p.address)}) : p) : list; }
 function normalizeAddressSpacing(address){
   if(!address) return address;
   // "로" 뒤에 바로 건물번호 숫자가 오면 띄어씀. 단 "OO로25길"처럼 로 다음이 길로 이어지는
@@ -1105,6 +1407,142 @@ async function cleanupAddressSpacing(){
   await saveProperties();
   render();
   alert(changed > 0 ? `${changed}곳 주소 띄어쓰기를 정리했어.` : '이미 다 정리돼 있어서 바뀐 게 없어.');
+}
+
+function unitFromAddr(a){ const t = String(a||''); const b = t.match(/([A-Za-z])\s*동\s*(\d{3,4})\s*호/); if(b) return b[1].toUpperCase()+b[2]; const ms = [...t.matchAll(/(\d{3,4})\s*호/g)]; return ms.length ? ms[ms.length-1][1] : ''; }
+// 대표별 색 (원본 엑셀의 색을 그대로 옮김: bg=엑셀색, bar=같은 색을 진하게)
+const OWNER_COLORS = {
+  '구정택': {bg:'#FCE4D6', bar:'#F4B183'},
+  '이수현': {bg:'#DDEBF7', bar:'#9DC3E6'},
+  '김현진': {bg:'#F2CEEF', bar:'#E08AD6'},
+  '이미선': {bg:'#E2EFDA', bar:'#A9D18E'},
+  '조기환': {bg:'#FFF2CC', bar:'#FFD966'},  // 동교스테이 (이미선 연두와 구분되게 노랑)
+};
+// 대표가 비어 있는 숙소는 전화번호로 색 지정
+const PHONE_COLORS = {
+  '01091409067': {bg:'#E4DCF4', bar:'#9B86D6'},  // 창천동 잇다
+};
+function ownerStyle(p, tint){
+  let c = p && OWNER_COLORS[String(p.owner||'').trim()];
+  if(!c && p && !String(p.owner||'').trim()) c = PHONE_COLORS[String(p.phone||'').replace(/\D/g,'')];
+  if(!c) return '';
+  return `border-left:8px solid ${c.bar};` + (tint ? `background:${c.bg};` : '');
+}
+function suggestPropName(old, all, addr){
+  if(/^창천/.test(String(old||'').trim()) && addr && unitFromAddr(addr)) { const rm = /투룸/.test(old) ? '2룸' : ((String(old).match(/([123])\s*룸/)||[])[1] ? String(old).match(/([123])\s*룸/)[1]+'룸' : '2룸'); return ((/잇다/.test(old) || /신촌로\s*3나?길\s*8-10/.test(addr)) ? '창천잇다 ' : '창천 ')+rm+' '+unitFromAddr(addr); }
+  let r = suggestPropName0(old, all).replace(/(\d)호(?=\s|$)/g,'$1');
+  if(addr && !/\d{3,}/.test(r) && !/\d층$/.test(r) && !/\s[A-D]$/.test(r)){ const u = unitFromAddr(addr); if(u) r += ' '+u; else { const f = String(addr).match(/(\d{1,2})\s*층/); if(f) r += ' '+f[1]+'층'; } }
+  return r;
+}
+function suggestPropName0(old, all){
+  let n = String(old||'').trim().replace(/\s+/g,' ');
+  let m;
+  if((m = n.match(/^(?:LG|엘지)\s*팰리스\s*(\d{3,4})호?$/i))) return `LG팰리스 ${m[1]}호`;
+  if((m = n.match(/^파라다이스텔\s*(\d{3,4})호?$/))) return `파라다이스텔 ${m[1]}호`;
+  if((m = n.match(/^동교스테이\s*([A-Da-d])$/))) return `동교스테이 ${m[1].toUpperCase()}`;
+  if((m = n.match(/^창천동?\s*잇다\s*(\d룸)\s*(\d{3}호)?$/))) return `창천잇다 ${m[1]}${m[2]?' '+m[2]:''}`;
+  if((m = n.match(/^홍대\s*(\d{3})호?$/))) return `홍대 ${m[1]}호`;
+  if((m = n.match(/^와우산로\s*(\d+)$/))) return `와우산로 ${m[1]}`;
+  n = n.replace(/투룸/g,'2룸').replace(/원룸/g,'1룸').replace(/북측/g,'복층');
+  if((m = n.match(/^(망원|연남|용강|서교|창천|이대|합정|상수|연희)동?\s*([123]룸|복층)(\s*\d층)?$/))) n = `${m[1]} ${m[2]}${m[3]?' '+m[3].trim():''}`;
+  if(n==='망원 3룸' && all.some(x=>/^망원동?\s*3룸\s*2층$/.test(x.name))) n = '망원 3룸 1층';
+  return n;
+}
+function openRenameSheet(){
+  const rows = state.properties.map(p=>({id:p.id, old:p.name, nu:suggestPropName(p.name, state.properties, p.address)}));
+  const root = document.createElement('div');
+  root.className='overlay'; root.id='overlay';
+  const draw = ()=>{
+    const names = rows.map(r=>r.nu.trim());
+    const dup = new Set(names.filter((n,i)=> n && names.indexOf(n)!==i));
+    const changed = rows.filter(r=>r.nu.trim() && r.nu.trim()!==r.old).length;
+    root.querySelector('#rn_list').innerHTML = rows.map((r,i)=>{
+      const ch = r.nu.trim()!==r.old;
+      return `<div style="padding:8px 0;border-bottom:1px solid var(--line,#eee);">
+        <div style="font-size:12px;color:var(--ink-soft);">${esc(r.old)}${ch?' →':' (그대로)'}</div>
+        <input data-rn="${i}" value="${esc(r.nu)}" style="width:100%;box-sizing:border-box;padding:8px;border:1px solid ${dup.has(r.nu.trim())?'var(--clay,#c33)':'var(--line,#ddd)'};border-radius:8px;font-size:15px;${ch?'font-weight:700;':''}">
+        ${dup.has(r.nu.trim())?'<div style="font-size:11px;color:var(--clay,#c33);">이름이 겹쳐. 다르게 해줘.</div>':''}
+      </div>`;
+    }).join('');
+    root.querySelector('#rn_apply').textContent = changed ? `${changed}곳 이름 바꾸기` : '바꿀 게 없어';
+    root.querySelector('#rn_apply').disabled = !changed || dup.size>0;
+    root.querySelectorAll('[data-rn]').forEach(inp=> inp.oninput = ()=>{
+      rows[Number(inp.dataset.rn)].nu = inp.value;
+      const pos = inp.selectionStart; const idx = inp.dataset.rn;
+      draw();
+      const again = root.querySelector(`[data-rn="${idx}"]`); if(again){ again.focus(); try{ again.setSelectionRange(pos,pos); }catch(_){} }
+    });
+  };
+  root.innerHTML = `<div class="sheet">
+    <h2>숙소 이름 한번에 정리</h2>
+    <div style="font-size:12px;color:var(--ink-soft);margin-bottom:8px;">제안한 이름이 칸에 채워져 있어. 마음에 안 드는 건 직접 고쳐. 바뀐 이름은 굵게 보여. 옛 이름은 별칭으로 남겨서 일정 가져오기에서도 계속 찾아져.</div>
+    <div id="rn_list" style="max-height:52vh;overflow-y:auto;"></div>
+    <div class="sheet-actions"><button class="cancel-btn" id="rn_close">닫기</button><button class="save-btn" id="rn_apply">바꾸기</button></div>
+  </div>`;
+  document.body.appendChild(root);
+  draw();
+  root.querySelector('#rn_close').onclick = ()=> root.remove();
+  root.querySelector('#rn_apply').onclick = async ()=>{
+    const todo = rows.filter(r=>r.nu.trim() && r.nu.trim()!==r.old);
+    if(!todo.length) return;
+    if(!confirm(`${todo.length}곳 이름을 바꿀까?`)) return;
+    const map = new Map(todo.map(r=>[r.id, r.nu.trim()]));
+    state.properties = state.properties.map(p=>{
+      if(!map.has(p.id)) return p;
+      const al = Array.from(new Set([p.name, ...(p.aliases||[])])).filter(x=>x && x!==map.get(p.id));
+      return { ...p, name: map.get(p.id), aliases: al };
+    });
+    await saveProperties();
+    root.remove(); render();
+    alert(`${todo.length}곳 이름을 바꿨어.`);
+  };
+}
+
+const ROOM_PRESET = [
+  {room:'용강동2룸 101', re:/^용강/},
+  {room:'제니하우스 201', re:/^제니하우스/},
+  {room:'준삐삐하우스 401', re:/^준삐삐/},
+  {room:'동교스테이 A·B·C·D', re:/^동교스테이/},
+  {room:'연남동3룸 3층', re:/^연남/},
+  {room:'서교동복층', re:/^서교/},
+  {room:'오송아트빌 B201', re:/^오송아트빌/},
+  {room:'파라다이스텔·LG 729·1520', re:/^(파라다이스텔|LG팰리스\s*(729|1520))/},
+  {room:'와우산로·LG 1208·1408·1412', re:/^(LG팰리스\s*(1408|1412|1208)|와우산로)/},
+  {room:'창천동잇다', re:/^창천잇다/},
+  {room:'망원동2룸 201', re:/^망원\s*2룸/},
+  {room:'망원동3룸 1층·2층', re:/^망원\s*3룸/},
+  {room:'동교로 101·102·301', re:/^동교로/},
+];
+function openRoomSheet(){
+  const rows = ROOM_PRESET.map(r=>({ room:r.room, ids: state.properties.filter(p=>r.re.test(p.name)).map(p=>p.id) }));
+  const root = document.createElement('div');
+  root.className='overlay'; root.id='overlay';
+  const noRoom = state.properties.filter(p=>!rows.some(r=>r.ids.includes(p.id)));
+  root.innerHTML = `<div class="sheet">
+    <h2>카톡방 한번에 연결</h2>
+    <div style="font-size:12px;color:var(--ink-soft);margin-bottom:8px;">방 이름은 직접 고칠 수 있어. 연결하면 해당 숙소의 "카톡방 이름" 칸에 들어가. 숙소가 하나도 없는 방은 건너뛰어.</div>
+    <div style="max-height:54vh;overflow-y:auto;">
+    ${rows.map((r,i)=>`<div style="padding:8px 0;border-bottom:1px solid var(--line,#eee);">
+      <input data-rm="${i}" value="${esc(r.room)}" style="width:100%;box-sizing:border-box;padding:8px;border:1px solid var(--line,#ddd);border-radius:8px;font-size:15px;font-weight:700;">
+      <div style="font-size:12px;margin-top:4px;color:${r.ids.length?'var(--ink-soft)':'var(--clay,#c33)'};">${r.ids.length ? r.ids.map(id=>esc(propById(id).name)).join(', ') : '맞는 숙소가 없어 (건너뜀)'}</div>
+    </div>`).join('')}
+    ${noRoom.length?`<div style="font-size:12px;color:var(--ink-soft);padding:10px 0;">방이 없는 숙소: ${noRoom.map(p=>esc(p.name)).join(', ')}</div>`:''}
+    </div>
+    <div class="sheet-actions"><button class="cancel-btn" id="rm_close">닫기</button><button class="save-btn" id="rm_apply">연결하기</button></div>
+  </div>`;
+  document.body.appendChild(root);
+  root.querySelector('#rm_close').onclick = ()=> root.remove();
+  root.querySelector('#rm_apply').onclick = async ()=>{
+    root.querySelectorAll('[data-rm]').forEach(inp=>{ rows[Number(inp.dataset.rm)].room = inp.value.trim(); });
+    const map = new Map();
+    rows.forEach(r=>{ if(r.room) r.ids.forEach(id=> map.set(id, r.room)); });
+    if(!map.size){ alert('연결할 숙소가 없어.'); return; }
+    if(!confirm(`${map.size}곳에 카톡방 이름을 넣을까?`)) return;
+    state.properties = state.properties.map(p=> map.has(p.id) ? {...p, room: map.get(p.id)} : p);
+    await saveProperties();
+    root.remove(); render();
+    alert(`${map.size}곳에 카톡방 이름을 넣었어.`);
+  };
 }
 
 function openBulkParkingSheet(){
@@ -1456,6 +1894,10 @@ function render(){
   const view = document.getElementById('view');
   const fab = document.getElementById('fab');
   document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active', t.dataset.tab===state.tab));
+  if(COMPANY_MODE){
+    const tt = document.querySelector('.tab[data-tab="today"]');
+    if(tt){ const sd = state.selectedDate; tt.textContent = (sd===todayStr()) ? '오늘' : (parseInt(sd.slice(5,7),10)+'/'+parseInt(sd.slice(8,10),10)); }
+  }
   document.getElementById('view').classList.toggle('wide', state.tab==='cal');
 
   if(state.tab === 'today'){
@@ -1499,9 +1941,11 @@ function renderClockReadOnly(){
 }
 
 function renderClockCard(){
-  const entry = getWorkEntry(todayStr()) || { clockIn: null, clockOut: null };
+  const cd = state.selectedDate || todayStr();
+  const entry = getWorkEntry(cd) || { clockIn: null, clockOut: null };
   return `
     <div class="clock-card">
+      ${cd!==todayStr() ? `<div style="font-size:12px;color:var(--ink-soft);margin-bottom:6px;">📝 ${parseInt(cd.slice(5,7),10)}/${parseInt(cd.slice(8,10),10)} 기록 (지난 날짜도 수정 가능)</div>` : ''}
       <div class="clock-row">
         <div class="clock-item">
           <span class="clock-label">출근</span>
@@ -1526,19 +1970,20 @@ function renderClockCard(){
                 : `<span class="clock-dim">출근 후 가능</span>`)}
         </div>
       </div>
-      ${entry.clockIn && entry.clockOut ? `<div class="clock-duration">오늘 근무 시간: ${formatDuration(entry.clockIn, entry.clockOut)}</div>` : ''}
+      ${entry.clockIn && entry.clockOut ? `<div class="clock-duration">${state.selectedDate===todayStr()?'오늘':'이날'} 근무 시간: ${formatDuration(entry.clockIn, entry.clockOut)}</div>` : ''}
     </div>
   `;
 }
 
 async function stepClockTime(field, delta){
-  const entry = getWorkEntry(todayStr()) || { clockIn: null, clockOut: null };
+  const cdate = state.selectedDate || todayStr();
+  const entry = getWorkEntry(cdate) || { clockIn: null, clockOut: null };
   const cur = entry[field] || nowHHMM();
   const [h, m] = cur.split(':').map(Number);
   let total = ((h*60 + m + delta) % 1440 + 1440) % 1440;
   const nh = Math.floor(total/60), nm = total%60;
   const newVal = `${String(nh).padStart(2,'0')}:${String(nm).padStart(2,'0')}`;
-  await upsertWorkEntry(todayStr(), { [field]: newVal });
+  await upsertWorkEntry(cdate, { [field]: newVal });
   render();
 }
 
@@ -1558,7 +2003,7 @@ function renderPickerBody(mode){
   const isTodaySelected = state.selectedDate === todayStr();
   return `
     ${renderScheduleCalendar()}
-    ${(isEdit || COMPANY_MODE) ? '' : (isTodaySelected ? renderClockCard() : renderClockReadOnly())}
+    ${(isEdit || COMPANY_MODE) ? '' : (state.selectedDate <= todayStr() ? renderClockCard() : renderClockReadOnly())}
     <div class="picker-intro" style="margin-bottom:0;">${isEdit ? `➕ <b>${dateLabel} 업체 추가/제외</b> — 이미 체크한 세탁물·컨디션 진행 상황은 그대로 남아.` : `📋 <b>${dateLabel}</b> 일정을 만들어줘`}</div>
     <div class="paste-box">
       <label>일정·순서 메시지 붙여넣기 (선택)</label>
@@ -1631,7 +2076,7 @@ function renderScheduleCards(){
       </div>
     ` : '';
     return `
-      <div class="job-card ${isDone?'done':''} ${isPriority && !isDone ?'priority':''} ${state.openJobIds.has(id)?'open':''}">
+      <div class="job-card ${isDone?'done':''} ${isPriority && !isDone ?'priority':''} ${state.openJobIds.has(id)?'open':''}" style="${ownerStyle(p,false)}">
         <div class="job-head" data-toggle-job="${id}">
           <div class="order-cluster">
             ${isAdmin() ? `<div class="order-controls-mini">
@@ -1657,6 +2102,7 @@ function renderScheduleCards(){
           </div>
           <div class="job-row" style="margin-top:8px;${isAdmin()?'':'display:none;'}">
             <button class="priority-toggle ${isPriority?'active':''}" data-toggle-priority="${id}">🔴 당일체크인${isPriority?' 해제':''}</button>
+            <button class="priority-toggle" data-move-date="${id}" style="margin-left:6px;">📅 날짜 이동</button>
           </div>
           <div class="assign-row">
             <span class="pw-icon">👤</span>
@@ -1702,7 +2148,7 @@ function renderScheduleCards(){
   }).join('');
 
   return `
-    ${COMPANY_MODE ? '' : (state.selectedDate === todayStr() ? renderClockCard() : renderClockReadOnly())}
+    ${COMPANY_MODE ? '' : (state.selectedDate <= todayStr() ? renderClockCard() : renderClockReadOnly())}
     <div class="summary">
       <div class="date">${renderDateLabel()}</div>
       <div class="count-row">
@@ -1715,6 +2161,7 @@ function renderScheduleCards(){
         </div>
       </div>
     </div>
+    ${renderSendStrip()}
     ${laundryAllDone ? `<button class="export-btn" id="laundryReportBtn" style="margin-top:0;margin-bottom:14px;background:var(--teal);">🧺 세탁물 전달 완료 보고하기</button>` : ''}
     ${cards}
     ${(state.todayRecord.excludedIds && state.todayRecord.excludedIds.length > 0) ? `
@@ -1733,16 +2180,16 @@ function renderScheduleCards(){
 function renderAll(){
   const q = state.search.trim().toLowerCase();
   const list = state.properties.filter(p =>
-    !q || p.name.toLowerCase().includes(q) || (p.owner||'').toLowerCase().includes(q) || (p.address||'').toLowerCase().includes(q)
+    !q || p.name.toLowerCase().includes(q) || (p.owner||'').toLowerCase().includes(q) || (p.room||'').toLowerCase().includes(q) || (p.address||'').toLowerCase().includes(q)
   );
   const cards = list.map(p=>{
     const open = state.openIds.has(p.id);
     return `
-    <div class="prop-card ${open?'open':''}">
+    <div class="prop-card ${open?'open':''}" style="${ownerStyle(p,true)}">
       <div class="prop-top" data-toggle="${p.id}">
         <div>
           <div class="prop-name">${esc(p.name)}</div>
-          <div class="prop-sub">${esc(p.owner||'담당자 미기재')} · ${esc(p.address)}</div>
+          <div class="prop-sub">${esc(p.owner||'담당자 미기재')} · ${esc(p.address)}${p.room?' · 💬 '+esc(p.room):''}</div>
         </div>
         <div class="chevron">▶</div>
       </div>
@@ -1779,6 +2226,8 @@ function renderAll(){
       ${state.toolsOpen ? `
         <div style="margin-top:8px;display:flex;flex-direction:column;gap:8px;">
           ${isAdmin() ? `<button class="pill-btn" id="bulkParkingBtn">🚗 여러 업체에 주차등록 정보 한번에 적용</button>
+          <button class="pill-btn" id="renamePropsBtn">✏️ 숙소 이름 한번에 정리</button>
+          <button class="pill-btn" id="roomPropsBtn">💬 카톡방 한번에 연결</button>
           <button class="pill-btn" id="cleanupAddressBtn">🧹 주소 띄어쓰기 한번에 정리</button>
           ${CLOUD_ENABLED ? `<button class="pill-btn" id="cleanupPhotosBtn">🗑️ 30일 지난 사진 정리</button>
           <button class="pill-btn" id="uploadLocalBtn">☁️ 이 폰의 데이터를 서버로 올리기</button>` : ''}` : ''}
@@ -1938,7 +2387,8 @@ function openEditSheet(prop){
     <div class="sheet">
       <h2>${e.id ? '업체 정보 수정' : '새 업체 추가'}</h2>
       <div class="field"><label>상호명</label><input id="f_name" value="${esc(e.name)}"></div>
-      <div class="field"><label>담당자</label><input id="f_owner" value="${esc(e.owner)}"></div>
+      <div class="field"><label>담당자(대표)</label><input id="f_owner" value="${esc(e.owner)}"></div>
+      <div class="field"><label>카톡방 이름</label><input id="f_room" value="${esc(e.room||'')}" placeholder="예: 용강동2룸 업무방"></div>
       <div class="field"><label>연락처</label><input id="f_phone" value="${esc(e.phone)}"></div>
       <div class="field"><label>주소</label><input id="f_address" value="${esc(e.address)}"></div>
       <div class="field"><label>비밀번호</label><input id="f_password" value="${esc(e.password)}"></div>
@@ -1972,6 +2422,7 @@ function openEditSheet(prop){
     const vals = {
       name: document.getElementById('f_name').value.trim(),
       owner: document.getElementById('f_owner').value.trim(),
+      room: document.getElementById('f_room').value.trim(),
       phone: document.getElementById('f_phone').value.trim(),
       address: document.getElementById('f_address').value.trim(),
       password: document.getElementById('f_password').value.trim(),
@@ -2183,6 +2634,7 @@ function attachHandlers(){
   document.querySelectorAll('[data-toggle-priority]').forEach(el=>{
     el.onclick = ()=> togglePriority(el.dataset.togglePriority);
   });
+  document.querySelectorAll('[data-move-date]').forEach(el=>{ el.onclick = ()=> moveProperty(el.dataset.moveDate); });
   const confirmBtn = document.getElementById('confirmPick');
   if(confirmBtn) confirmBtn.onclick = createTodayList;
   const laundryReportBtn = document.getElementById('laundryReportBtn');
@@ -2266,15 +2718,16 @@ function attachHandlers(){
   document.querySelectorAll('[data-clock-action]').forEach(el=>{
     el.onclick = async ()=>{
       const action = el.dataset.clockAction;
-      if(action === 'in') await upsertWorkEntry(todayStr(), { clockIn: '10:00' });
-      else await upsertWorkEntry(todayStr(), { clockOut: '16:00' });
+      const cdate = state.selectedDate || todayStr();
+      if(action === 'in') await upsertWorkEntry(cdate, { clockIn: '10:00' });
+      else await upsertWorkEntry(cdate, { clockOut: '16:00' });
       render();
     };
   });
   document.querySelectorAll('[data-clock-edit]').forEach(el=>{
     el.onchange = async ()=>{
       const field = el.dataset.clockEdit === 'in' ? 'clockIn' : 'clockOut';
-      await upsertWorkEntry(todayStr(), { [field]: el.value });
+      await upsertWorkEntry(state.selectedDate || todayStr(), { [field]: el.value });
       render();
     };
   });
@@ -2311,6 +2764,7 @@ function attachHandlers(){
   if(uploadLocalBtn) uploadLocalBtn.onclick = uploadLocalData;
   const logoutBtn = document.getElementById('logoutBtn');
   if(logoutBtn) logoutBtn.onclick = async ()=>{ if(confirm('로그아웃할까?')){ await cloud.fn.signOut(cloud.auth); location.reload(); } };
+  document.querySelectorAll('[data-staff-msg]').forEach(b=> b.onclick = ()=> openPersonalSheet(b.dataset.staffMsg));
   const openAssignBtn = document.getElementById('openAssign');
   if(openAssignBtn) openAssignBtn.onclick = openAssignSheet;
   document.querySelectorAll('[data-assign]').forEach(el=>{
@@ -2326,6 +2780,10 @@ function attachHandlers(){
   });
   const bulkParkingBtn = document.getElementById('bulkParkingBtn');
   if(bulkParkingBtn) bulkParkingBtn.onclick = openBulkParkingSheet;
+  const roomPropsBtn = document.getElementById('roomPropsBtn');
+  if(roomPropsBtn) roomPropsBtn.onclick = openRoomSheet;
+  const renamePropsBtn = document.getElementById('renamePropsBtn');
+  if(renamePropsBtn) renamePropsBtn.onclick = openRenameSheet;
   const cleanupAddressBtn = document.getElementById('cleanupAddressBtn');
   if(cleanupAddressBtn) cleanupAddressBtn.onclick = cleanupAddressSpacing;
   const toggleToolsBtn = document.getElementById('toggleTools');
@@ -2424,8 +2882,22 @@ function levenshteinDistance(a, b){
   }
   return dp[a.length][b.length];
 }
+function nameKey(s){
+  return (s||'').toLowerCase().replace(/\s+/g,'')
+    .replace(/lg/g,'엘지').replace(/팰리스/g,'').replace(/호/g,'')
+    .replace(/투룸/g,'2룸').replace(/원룸/g,'1룸').replace(/북측/g,'복층')
+    .replace(/동(?=\d)/g,'').replace(/25길9(?=\d)/g,'25길')
+    .replace(/2룸(?=\d{3})/g,'');
+}
 function findBestPropertyMatch(line){
   const normLine = normalizeForMatch(line);
+  // 0차: 이름이 정확히 같으면 그걸 우선
+  const exact = state.properties.find(p=>normalizeForMatch(p.name)===normLine) || state.properties.find(p=>(p.aliases||[]).some(a=>normalizeForMatch(a)===normLine));
+  if(exact) return exact;
+  // 0.5차: 표기만 다른 같은 이름(LG/엘지, 투룸/2룸 등) 정리해서 비교
+  const keyLine = nameKey(line);
+  const keyHit = state.properties.filter(p=>nameKey(p.name)===keyLine || (p.aliases||[]).some(a=>nameKey(a)===keyLine));
+  if(keyHit.length===1) return keyHit[0];
   // 1차: 포함 관계로 정확히 찾히는 것 우선 (더 짧게 일치하는 쪽이 더 정확한 매칭)
   let best = null;
   state.properties.forEach(p=>{
@@ -2646,7 +3118,7 @@ let lastPropsRaw = null, lastStaffRaw = null;
 function watchShared(){
   watchKey('props', KEY_PROPS, v=>{
     if(v === lastPropsRaw) return; lastPropsRaw = v;
-    try{ state.properties = v ? JSON.parse(v) : []; }catch(e){}
+    try{ state.properties = v ? cleanProps(JSON.parse(v)) : []; }catch(e){}
     safeRender();
   });
   watchKey('staff', 'staff:list', v=>{
@@ -2725,6 +3197,7 @@ async function startApp(){
       b.onclick = async ()=>{ if(confirm('로그아웃할까?')){ await cloud.fn.signOut(cloud.auth); location.reload(); } };
       tb.appendChild(b);
     }
+    if(!state._init){ state.tab = 'cal'; state._init = 1; }
     if(!isAdmin() && state.tab !== 'today' && state.tab !== 'cal') state.tab = 'today';
   }
   state.selectedDate = todayStr();
